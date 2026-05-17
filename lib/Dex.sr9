@@ -1,0 +1,1306 @@
+import AssetKey "./AssetKey";
+import AmmMath "./AmmMath";
+import BalanceBook "./BalanceBook";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import InFlightDeposits "./InFlightDeposits";
+import LedgerAccounting "./LedgerAccounting";
+import LedgerSet "./LedgerSet";
+import PendingReturns "./PendingReturns";
+import PendingWithdrawals "./PendingWithdrawals";
+import PoolRegistry "./PoolRegistry";
+import Types "./Types";
+
+module {
+  public type Model = {
+    controller : Principal
+  };
+
+  public type State = opaque {
+    controller : Principal;
+    var witness : Nat;
+    ledgers : LedgerSet.LedgerSet;
+    balances : BalanceBook.BalanceBook;
+    pools : PoolRegistry.PoolRegistry;
+    accounting : LedgerAccounting.LedgerAccounting;
+    pendingWithdrawals : PendingWithdrawals.PendingWithdrawals;
+    pendingReturns : PendingReturns.PendingReturns;
+    inFlightDeposits : InFlightDeposits.InFlightDeposits
+  };
+
+  public pure func model(dex : State) : Model
+    requires true;
+    ensures result.controller == dex.controller;
+  {
+    { controller = dex.controller }
+  };
+
+  public ghost func controllerOf(dex : State) : Principal
+    requires true;
+    ensures result == model(dex).controller;
+  {
+    model(dex).controller
+  };
+
+  public func empty(controller : Principal) : State
+    requires true;
+    ensures controllerOf(result) == controller;
+  {
+    {
+      controller = controller;
+      var witness = 0;
+      ledgers = LedgerSet.empty();
+      balances = BalanceBook.empty();
+      pools = PoolRegistry.empty();
+      accounting = LedgerAccounting.empty();
+      pendingWithdrawals = PendingWithdrawals.empty();
+      pendingReturns = PendingReturns.empty();
+      inFlightDeposits = InFlightDeposits.empty()
+    }
+  };
+
+  public pure func controller(dex : State) : Principal
+    requires true;
+    ensures result == controllerOf(dex);
+  {
+    dex.controller
+  };
+
+  public func balances(dex : State, user : Principal) : [(Text, Nat)]
+    requires true;
+    ensures model(dex) == old(model(dex));
+  {
+    BalanceBook.balances(dex.balances, user)
+  };
+
+  public func pools(dex : State) : [Types.PoolInfo]
+    requires true;
+    ensures model(dex) == old(model(dex));
+  {
+    PoolRegistry.list(dex.pools)
+  };
+
+  public pure func localBalance(dex : State, user : Principal, assetKey : Text) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result == BalanceBook.get(dex.balances, user, assetKey);
+  {
+    BalanceBook.get(dex.balances, user, assetKey)
+  };
+
+  public pure func localLedgerBalanceTotal(dex : State, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result == BalanceBook.total(dex.balances, AssetKey.ledger(ledger));
+  {
+    BalanceBook.total(dex.balances, AssetKey.ledger(ledger))
+  };
+
+  public pure func ledgerNet(dex : State, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result == LedgerAccounting.net(dex.accounting, AssetKey.ledger(ledger));
+  {
+    LedgerAccounting.net(dex.accounting, AssetKey.ledger(ledger))
+  };
+
+  public pure func ledgerSettled(dex : State, ledger : Principal) : Bool
+    requires true;
+    ensures result == LedgerAccounting.settled(dex.accounting, AssetKey.ledger(ledger));
+  {
+    LedgerAccounting.settled(dex.accounting, AssetKey.ledger(ledger))
+  };
+
+  public pure func localObligation(dex : State, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result ==
+      BalanceBook.total(dex.balances, AssetKey.ledger(ledger)) +
+      PoolRegistry.reserveTotal(dex.pools, ledger);
+  {
+    BalanceBook.total(dex.balances, AssetKey.ledger(ledger)) +
+    PoolRegistry.reserveTotal(dex.pools, ledger)
+  };
+
+  public pure func pendingOut(dex : State, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result ==
+      PendingWithdrawals.total(dex.pendingWithdrawals, AssetKey.ledger(ledger)) +
+      PendingReturns.total(dex.pendingReturns, AssetKey.ledger(ledger));
+  {
+    let key = AssetKey.ledger(ledger);
+    PendingWithdrawals.total(dex.pendingWithdrawals, key) +
+    PendingReturns.total(dex.pendingReturns, key)
+  };
+
+  public inline pure func pendingWithdrawalDebit(dex : State, user : Principal, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == PendingWithdrawals.pendingDebit(dex.pendingWithdrawals, user, ledgerKey);
+  {
+    PendingWithdrawals.pendingDebit(dex.pendingWithdrawals, user, ledgerKey)
+  };
+
+  public inline pure func pendingReturnLocalBalance(dex : State, user : Principal, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == PendingReturns.localBalanceAmount(dex.pendingReturns, user, ledgerKey);
+  {
+    PendingReturns.localBalanceAmount(dex.pendingReturns, user, ledgerKey)
+  };
+
+  public pure func accountingBalanced(dex : State, ledger : Principal) : Bool
+    requires true;
+    ensures result == (ledgerNet(dex, ledger) == localObligation(dex, ledger) + pendingOut(dex, ledger));
+  {
+    ledgerNet(dex, ledger) == localObligation(dex, ledger) + pendingOut(dex, ledger)
+  };
+
+  public pure func lpSupplyBalanced(dex : State, ledgerA : Principal, ledgerB : Principal) : Bool
+    requires ledgerA != ledgerB;
+    ensures result == (
+      PoolRegistry.totalShareSupply(dex.pools, AssetKey.pool(ledgerA, ledgerB)) ==
+      BalanceBook.total(dex.balances, AssetKey.pool(ledgerA, ledgerB)) +
+      PoolRegistry.lockedShareSupply(dex.pools, AssetKey.pool(ledgerA, ledgerB))
+    );
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    PoolRegistry.totalShareSupply(dex.pools, key) ==
+      BalanceBook.total(dex.balances, key) + PoolRegistry.lockedShareSupply(dex.pools, key)
+  };
+
+  public pure func lpLockedWithinSupply(dex : State, ledgerA : Principal, ledgerB : Principal) : Bool
+    requires ledgerA != ledgerB;
+    ensures result == (
+      PoolRegistry.lockedShareSupply(dex.pools, AssetKey.pool(ledgerA, ledgerB)) <=
+      PoolRegistry.totalShareSupply(dex.pools, AssetKey.pool(ledgerA, ledgerB))
+    );
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    PoolRegistry.lockedShareSupply(dex.pools, key) <=
+      PoolRegistry.totalShareSupply(dex.pools, key)
+  };
+
+  public pure func ledgerHasPool(dex : State, ledger : Principal) : Bool
+    requires true;
+    ensures result == PoolRegistry.containsLedger(dex.pools, ledger);
+  {
+    PoolRegistry.containsLedger(dex.pools, ledger)
+  };
+
+  private func refreshTransferFeePreservingBalance(
+    dex : State,
+    ledger : Principal,
+    err : ICRCLedger.TransferError,
+    user : Principal,
+    key : Text
+  ) : ()
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localBalance(dex, user, key) == old(localBalance(dex, user, key));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    switch (err) {
+      case (#BadFee({ expected_fee })) {
+        LedgerSet.refreshFee(dex.ledgers, ledger, expected_fee)
+      };
+      case _ {}
+    }
+  };
+
+  private func refreshTransferFromFee(
+    dex : State,
+    ledger : Principal,
+    err : ICRCLedger.TransferFromError
+  ) : ()
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    switch (err) {
+      case (#BadFee({ expected_fee })) {
+        LedgerSet.refreshFee(dex.ledgers, ledger, expected_fee)
+      };
+      case _ {}
+    }
+  };
+
+  public func controllerAddLedgerPrecheck(
+    dex : State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    switch (LedgerSet.status(dex.ledgers, ledger)) {
+      case (#absent) { #ok(()) };
+      case (#active) { #err(#ledgerAlreadyActive ledger) };
+      case (#retiring) { #err(#ledgerAlreadyRetiring ledger) }
+    }
+  };
+
+  public func controllerAddLedger(
+    dex : State,
+    caller : Principal,
+    ledger : Principal,
+    fee : Nat
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    LedgerSet.add(dex.ledgers, ledger, fee)
+  };
+
+  public func controllerRetireLedger(
+    dex : State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    LedgerSet.retire(dex.ledgers, ledger)
+  };
+
+  public func controllerRemoveLedger(
+    dex : State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { not ledgerHasPool(dex, ledger) };
+      case (#err(_)) { true }
+    };
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    switch (LedgerSet.status(dex.ledgers, ledger)) {
+      case (#absent) { return #err(#ledgerNotWhitelisted ledger) };
+      case (#active) { return #err(#ledgerNotRetiring ledger) };
+      case (#retiring) {}
+    };
+    let ledgerKey = AssetKey.ledger(ledger);
+    if (PoolRegistry.containsLedger(dex.pools, ledger)) {
+      return #err(#ledgerHasPools ledger)
+    };
+    if (BalanceBook.total(dex.balances, ledgerKey) > 0) {
+      return #err(#ledgerHasLocalBalances ledger)
+    };
+    if (
+      PendingWithdrawals.hasLedger(dex.pendingWithdrawals, ledgerKey) or
+      PendingReturns.hasLedger(dex.pendingReturns, ledgerKey) or
+      InFlightDeposits.hasLedger(dex.inFlightDeposits, ledgerKey)
+    ) {
+      return #err(#ledgerHasPendingOps ledger)
+    };
+    LedgerSet.rem(dex.ledgers, ledger)
+  };
+
+  public func createPool(
+    dex : State,
+    caller : Principal,
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : Types.Result<Types.PoolInfo, Types.CreatePoolError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok info) {
+        info.ledgerA != info.ledgerB and
+        info.key == AssetKey.pool(ledgerA, ledgerB) and
+        info.reserveA == 0 and
+        info.reserveB == 0 and
+        info.totalShares == 0 and
+        info.lockedShares == 0 and
+        ledgerHasPool(dex, ledgerA) and
+        ledgerHasPool(dex, ledgerB)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    if (ledgerA == ledgerB) {
+      return #err(#sameLedger)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerA)) {
+      return #err(#ledgerNotActive ledgerA)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerB)) {
+      return #err(#ledgerNotActive ledgerB)
+    };
+    PoolRegistry.createPool(dex.pools, ledgerA, ledgerB)
+  };
+
+  public trusted func removePool(
+    dex : State,
+    caller : Principal,
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : Types.Result<Types.RemovePoolReceipt, Types.RemovePoolError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.key == AssetKey.pool(ledgerA, ledgerB) and
+        receipt.ledgerA != receipt.ledgerB
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    if (ledgerA == ledgerB) {
+      return #err(#sameLedger)
+    };
+    let infoOpt = PoolRegistry.getInfo(dex.pools, ledgerA, ledgerB);
+    switch (infoOpt) {
+      case null {
+        #err(#poolNotFound)
+      };
+      case (?info) {
+        let poolKey = info.key;
+        let holders = BalanceBook.holders(dex.balances, poolKey);
+        var i = 0;
+        var remainingA = info.reserveA;
+        var remainingB = info.reserveB;
+        var remainingShares = info.totalShares;
+        var settledUsers = 0;
+        var burnedUserShares = 0;
+        var returnedA = 0;
+        var returnedB = 0;
+        var controllerLockedA = 0;
+        var controllerLockedB = 0;
+        label settle while (i < holders.size()) {
+          loop:invariant i <= holders.size();
+          let user = holders[i];
+          let shares = BalanceBook.get(dex.balances, user, poolKey);
+          if (shares > 0 and shares <= remainingShares and remainingShares > 0) {
+            let lastUser = (i + 1 == holders.size()) and info.lockedShares == 0;
+            let amountA = if (lastUser) { remainingA } else { (shares * remainingA) / remainingShares };
+            let amountB = if (lastUser) { remainingB } else { (shares * remainingB) / remainingShares };
+            ignore BalanceBook.debit(dex.balances, user, poolKey, shares);
+            BalanceBook.credit(dex.balances, user, AssetKey.ledger(info.ledgerA), amountA);
+            BalanceBook.credit(dex.balances, user, AssetKey.ledger(info.ledgerB), amountB);
+            remainingA -= amountA;
+            remainingB -= amountB;
+            remainingShares -= shares;
+            settledUsers += 1;
+            burnedUserShares += shares;
+            returnedA += amountA;
+            returnedB += amountB
+          };
+          i += 1
+        };
+        if (info.lockedShares > 0) {
+          controllerLockedA := remainingA;
+          controllerLockedB := remainingB;
+          BalanceBook.credit(dex.balances, dex.controller, AssetKey.ledger(info.ledgerA), controllerLockedA);
+          BalanceBook.credit(dex.balances, dex.controller, AssetKey.ledger(info.ledgerB), controllerLockedB);
+          remainingA := 0;
+          remainingB := 0
+        };
+        ignore PoolRegistry.deletePool(dex.pools, ledgerA, ledgerB);
+        #ok({
+          key = poolKey;
+          ledgerA = info.ledgerA;
+          ledgerB = info.ledgerB;
+          settledUsers = settledUsers;
+          burnedUserShares = burnedUserShares;
+          burnedLockedShares = info.lockedShares;
+          returnedA = returnedA;
+          returnedB = returnedB;
+          controllerLockedA = controllerLockedA;
+          controllerLockedB = controllerLockedB
+        })
+      }
+    }
+  };
+
+  public func beginDeposit(
+    dex : State,
+    ledger : Principal,
+    amount : Nat
+  ) : Types.Result<(), Types.DepositError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    if (amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledger)) {
+      return #err(#ledgerNotActive ledger)
+    };
+    InFlightDeposits.begin(dex.inFlightDeposits, AssetKey.ledger(ledger));
+    #ok(())
+  };
+
+  public func deposit(
+    dex : State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat,
+    txIndex : Nat
+  ) : Types.DepositReceipt
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures result.ledger == ledger;
+    ensures result.amount == amount;
+    ensures result.txIndex == txIndex;
+    ensures result.balanceKey == AssetKey.ledger(ledger);
+    ensures localBalance(dex, caller, AssetKey.ledger(ledger)) ==
+      old(localBalance(dex, caller, AssetKey.ledger(ledger))) + amount;
+    ensures old(ledgerSettled(dex, ledger)) ==>
+      ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger)) + amount;
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger)) + amount;
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger)) + amount;
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+  {
+    let key = AssetKey.ledger(ledger);
+    BalanceBook.credit(dex.balances, caller, key, amount);
+    LedgerAccounting.recordDeposit(dex.accounting, key, amount);
+    {
+      ledger = ledger;
+      amount = amount;
+      txIndex = txIndex;
+      balanceKey = key
+    }
+  };
+
+  public func finishDepositOk(
+    dex : State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat,
+    txIndex : Nat
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.amount == amount and
+        receipt.txIndex == txIndex and
+        receipt.balanceKey == AssetKey.ledger(ledger) and
+        (
+          old(ledgerSettled(dex, ledger)) ==>
+          ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger)) + amount
+        ) and
+        localBalance(dex, caller, AssetKey.ledger(ledger)) ==
+          old(localBalance(dex, caller, AssetKey.ledger(ledger))) + amount and
+        localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger)) + amount and
+        localObligation(dex, ledger) == old(localObligation(dex, ledger)) + amount and
+        pendingOut(dex, ledger) == old(pendingOut(dex, ledger))
+      };
+      case (#err(_)) { false }
+    };
+  {
+    InFlightDeposits.end(dex.inFlightDeposits, AssetKey.ledger(ledger));
+    #ok(deposit(dex, caller, ledger, amount, txIndex))
+  };
+
+  public func finishDepositErr(
+    dex : State,
+    ledger : Principal,
+    err : ICRCLedger.TransferFromError
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    InFlightDeposits.end(dex.inFlightDeposits, AssetKey.ledger(ledger));
+    refreshTransferFromFee(dex, ledger, err);
+    #err(#ledgerTransferFromErr err)
+  };
+
+  public func finishDepositReject(
+    dex : State,
+    ledger : Principal,
+    reject : Types.LedgerReject
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
+  {
+    InFlightDeposits.end(dex.inFlightDeposits, AssetKey.ledger(ledger));
+    #err(#ledgerTransferFromRejected reject)
+  };
+
+  public func beginWithdraw(
+    dex : State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat
+  ) : Types.Result<Types.WithdrawStarted, Types.WithdrawError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok started) {
+        started.ledger == ledger and
+        started.amount == amount and
+        started.debitAmount == amount + started.fee and
+        started.balanceKey == AssetKey.ledger(ledger) and
+        localBalance(dex, caller, started.balanceKey) + started.debitAmount ==
+          old(localBalance(dex, caller, started.balanceKey))
+      };
+      case (#err(_)) {
+        localBalance(dex, caller, AssetKey.ledger(ledger)) ==
+          old(localBalance(dex, caller, AssetKey.ledger(ledger)))
+      }
+    };
+  {
+    let ledgerKey = AssetKey.ledger(ledger);
+    if (amount == 0) {
+      return #err(#zeroAmount)
+    };
+    var fee = 0;
+    switch (LedgerSet.cachedFee(dex.ledgers, ledger)) {
+      case null {
+        return #err(#ledgerNotWhitelisted ledger)
+      };
+      case (?value) { fee := value }
+    };
+    let key = ledgerKey;
+    if (PendingWithdrawals.has(dex.pendingWithdrawals, caller, key)) {
+      return #err(#withdrawInProgress)
+    };
+    let debitAmount = amount + fee;
+    let beforeBalance = localBalance(dex, caller, key);
+    if (beforeBalance < debitAmount) {
+      return #err(#insufficientLocalBalance)
+    };
+    assert beforeBalance >= debitAmount;
+    let debited = BalanceBook.debit(dex.balances, caller, key, debitAmount);
+    if (not debited) {
+      return #err(#insufficientLocalBalance)
+    };
+    assert localBalance(dex, caller, key) + debitAmount == beforeBalance;
+    let pending = { amount = amount; fee = fee; debitAmount = debitAmount };
+    if (not PendingWithdrawals.begin(dex.pendingWithdrawals, caller, key, pending)) {
+      BalanceBook.credit(dex.balances, caller, key, debitAmount);
+      return #err(#withdrawInProgress)
+    };
+    assert localBalance(dex, caller, key) + debitAmount == beforeBalance;
+    #ok({
+      ledger = ledger;
+      amount = amount;
+      fee = fee;
+      debitAmount = debitAmount;
+      balanceKey = key
+    })
+  };
+
+  public func finishWithdrawOk(
+    dex : State,
+    caller : Principal,
+    started : Types.WithdrawStarted,
+    txIndex : Nat
+  ) : Types.Result<Types.WithdrawReceipt, Types.WithdrawError>
+    requires true;
+    requires started.debitAmount == started.amount + started.fee;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == started.ledger and
+        receipt.amount == started.amount and
+        receipt.fee == started.fee and
+        receipt.debitAmount == started.debitAmount and
+        receipt.debitAmount == receipt.amount + receipt.fee and
+        receipt.txIndex == txIndex and
+        receipt.balanceKey == started.balanceKey
+      };
+      case (#err(_)) { true }
+    };
+    ensures localBalance(dex, caller, started.balanceKey) ==
+      old(localBalance(dex, caller, started.balanceKey));
+  {
+    switch (PendingWithdrawals.take(dex.pendingWithdrawals, caller, started.balanceKey)) {
+      case null { #err(#withdrawInProgress) };
+      case (?_) {
+        LedgerAccounting.recordWithdraw(dex.accounting, started.balanceKey, started.debitAmount);
+        #ok({
+          ledger = started.ledger;
+          amount = started.amount;
+          fee = started.fee;
+          debitAmount = started.debitAmount;
+          txIndex = txIndex;
+          balanceKey = started.balanceKey
+        })
+      }
+    }
+  };
+
+  public func finishWithdrawErr(
+    dex : State,
+    caller : Principal,
+    started : Types.WithdrawStarted,
+    err : ICRCLedger.TransferError
+  ) : Types.Result<Types.WithdrawReceipt, Types.WithdrawError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, started.ledger) == old(ledgerNet(dex, started.ledger));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures if (old(pendingWithdrawalDebit(dex, caller, started.balanceKey)) > 0) {
+      localBalance(dex, caller, started.balanceKey) ==
+        old(localBalance(dex, caller, started.balanceKey)) +
+        old(pendingWithdrawalDebit(dex, caller, started.balanceKey))
+    } else {
+      localBalance(dex, caller, started.balanceKey) ==
+        old(localBalance(dex, caller, started.balanceKey))
+    };
+  {
+    switch (PendingWithdrawals.take(dex.pendingWithdrawals, caller, started.balanceKey)) {
+      case null {};
+      case (?record) {
+        BalanceBook.credit(dex.balances, caller, started.balanceKey, record.debitAmount)
+      }
+    };
+    refreshTransferFeePreservingBalance(dex, started.ledger, err, caller, started.balanceKey);
+    #err(#ledgerTransferErr err)
+  };
+
+  public func finishWithdrawReject(
+    dex : State,
+    caller : Principal,
+    started : Types.WithdrawStarted,
+    reject : Types.LedgerReject
+  ) : Types.Result<Types.WithdrawReceipt, Types.WithdrawError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, started.ledger) == old(ledgerNet(dex, started.ledger));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures if (old(pendingWithdrawalDebit(dex, caller, started.balanceKey)) > 0) {
+      localBalance(dex, caller, started.balanceKey) ==
+        old(localBalance(dex, caller, started.balanceKey)) +
+        old(pendingWithdrawalDebit(dex, caller, started.balanceKey))
+    } else {
+      localBalance(dex, caller, started.balanceKey) ==
+        old(localBalance(dex, caller, started.balanceKey))
+    };
+  {
+    switch (PendingWithdrawals.take(dex.pendingWithdrawals, caller, started.balanceKey)) {
+      case null {};
+      case (?record) {
+        BalanceBook.credit(dex.balances, caller, started.balanceKey, record.debitAmount)
+      }
+    };
+    #err(#ledgerTransferRejected reject)
+  };
+
+  public func beginReturnLedgerBalances(
+    dex : State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<Types.ReturnStarted, Types.ReturnLedgerBalancesError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(#none receipt)) { receipt.ledger == ledger };
+      case (#ok(#some started)) {
+        started.ledger == ledger and
+        started.localBalance == started.returnedAmount + started.fee and
+        started.balanceKey == AssetKey.ledger(ledger)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (caller != dex.controller) {
+      return #err(#notController)
+    };
+    if (not LedgerSet.isListed(dex.ledgers, ledger)) {
+      return #err(#ledgerNotWhitelisted ledger)
+    };
+    if (not LedgerSet.isRetiring(dex.ledgers, ledger)) {
+      return #err(#ledgerNotRetiring ledger)
+    };
+    if (PoolRegistry.containsLedger(dex.pools, ledger)) {
+      return #err(#ledgerHasPools ledger)
+    };
+    let key = AssetKey.ledger(ledger);
+    if (
+      PendingWithdrawals.hasLedger(dex.pendingWithdrawals, key) or
+      PendingReturns.hasLedger(dex.pendingReturns, key) or
+      InFlightDeposits.hasLedger(dex.inFlightDeposits, key)
+    ) {
+      return #err(#ledgerHasPendingOps ledger)
+    };
+    let userOpt = BalanceBook.firstNonControllerHolder(dex.balances, key, dex.controller);
+    switch (userOpt) {
+      case null {
+        #ok(#none({
+          ledger = ledger;
+          returnedUsers = 0;
+          returnedUser = null;
+          localBalance = 0;
+          fee = 0;
+          returnedAmount = 0;
+          txIndex = null;
+          remainingLocalBalance = BalanceBook.total(dex.balances, key)
+        }))
+      };
+      case (?user) {
+        var fee = 0;
+        switch (LedgerSet.cachedFee(dex.ledgers, ledger)) {
+          case null { return #err(#ledgerNotWhitelisted ledger) };
+          case (?value) { fee := value }
+        };
+        let localBalance = BalanceBook.get(dex.balances, user, key);
+        if (localBalance <= fee) {
+          return #err(#returnBalanceDoesNotCoverFee({ balance = localBalance; fee = fee }))
+        };
+        let returnedAmount = localBalance - fee;
+        ignore BalanceBook.debit(dex.balances, user, key, localBalance);
+        if (not PendingReturns.begin(
+          dex.pendingReturns,
+          user,
+          key,
+          { localBalance = localBalance; fee = fee; returnedAmount = returnedAmount }
+        )) {
+          BalanceBook.credit(dex.balances, user, key, localBalance);
+          return #err(#ledgerHasPendingOps ledger)
+        };
+        #ok(#some({
+          ledger = ledger;
+          user = user;
+          localBalance = localBalance;
+          fee = fee;
+          returnedAmount = returnedAmount;
+          balanceKey = key
+        }))
+      }
+    }
+  };
+
+  public func finishReturnOk(
+    dex : State,
+    started : {
+      ledger : Principal;
+      user : Principal;
+      localBalance : Nat;
+      fee : Nat;
+      returnedAmount : Nat;
+      balanceKey : Text
+    },
+    txIndex : Nat
+  ) : Types.Result<Types.ReturnLedgerBalancesReceipt, Types.ReturnLedgerBalancesError>
+    requires true;
+    requires started.returnedAmount + started.fee == started.localBalance;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == started.ledger and
+        receipt.returnedUsers == 1 and
+        receipt.returnedUser == ?started.user and
+        receipt.localBalance == receipt.returnedAmount + receipt.fee and
+        receipt.txIndex == ?txIndex
+      };
+      case (#err(_)) { true }
+    };
+  {
+    switch (PendingReturns.take(dex.pendingReturns, started.user, started.balanceKey)) {
+      case null { #err(#ledgerHasPendingOps(started.ledger)) };
+      case (?_) {
+        LedgerAccounting.recordForcedReturn(dex.accounting, started.balanceKey, started.localBalance);
+        #ok({
+          ledger = started.ledger;
+          returnedUsers = 1;
+          returnedUser = ?started.user;
+          localBalance = started.localBalance;
+          fee = started.fee;
+          returnedAmount = started.returnedAmount;
+          txIndex = ?txIndex;
+          remainingLocalBalance = BalanceBook.total(dex.balances, started.balanceKey)
+        })
+      }
+    }
+  };
+
+  public func finishReturnErr(
+    dex : State,
+    started : {
+      ledger : Principal;
+      user : Principal;
+      localBalance : Nat;
+      fee : Nat;
+      returnedAmount : Nat;
+      balanceKey : Text
+    },
+    err : ICRCLedger.TransferError
+  ) : Types.Result<Types.ReturnLedgerBalancesReceipt, Types.ReturnLedgerBalancesError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, started.ledger) == old(ledgerNet(dex, started.ledger));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures if (old(pendingReturnLocalBalance(dex, started.user, started.balanceKey)) > 0) {
+      localBalance(dex, started.user, started.balanceKey) ==
+        old(localBalance(dex, started.user, started.balanceKey)) +
+        old(pendingReturnLocalBalance(dex, started.user, started.balanceKey))
+    } else {
+      localBalance(dex, started.user, started.balanceKey) ==
+        old(localBalance(dex, started.user, started.balanceKey))
+    };
+  {
+    switch (PendingReturns.take(dex.pendingReturns, started.user, started.balanceKey)) {
+      case null {};
+      case (?record) {
+        BalanceBook.credit(dex.balances, started.user, started.balanceKey, record.localBalance)
+      }
+    };
+    refreshTransferFeePreservingBalance(dex, started.ledger, err, started.user, started.balanceKey);
+    #err(#ledgerTransferErr err)
+  };
+
+  public func finishReturnReject(
+    dex : State,
+    started : {
+      ledger : Principal;
+      user : Principal;
+      localBalance : Nat;
+      fee : Nat;
+      returnedAmount : Nat;
+      balanceKey : Text
+    },
+    reject : Types.LedgerReject
+  ) : Types.Result<Types.ReturnLedgerBalancesReceipt, Types.ReturnLedgerBalancesError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, started.ledger) == old(ledgerNet(dex, started.ledger));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures if (old(pendingReturnLocalBalance(dex, started.user, started.balanceKey)) > 0) {
+      localBalance(dex, started.user, started.balanceKey) ==
+        old(localBalance(dex, started.user, started.balanceKey)) +
+        old(pendingReturnLocalBalance(dex, started.user, started.balanceKey))
+    } else {
+      localBalance(dex, started.user, started.balanceKey) ==
+        old(localBalance(dex, started.user, started.balanceKey))
+    };
+  {
+    switch (PendingReturns.take(dex.pendingReturns, started.user, started.balanceKey)) {
+      case null {};
+      case (?record) {
+        BalanceBook.credit(dex.balances, started.user, started.balanceKey, record.localBalance)
+      }
+    };
+    #err(#ledgerTransferRejected reject)
+  };
+
+  public func quote(
+    dex : State,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.QuoteReceipt, Types.QuoteError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, ledgerIn) == old(ledgerNet(dex, ledgerIn));
+    ensures ledgerNet(dex, ledgerOut) == old(ledgerNet(dex, ledgerOut));
+    ensures localObligation(dex, ledgerIn) == old(localObligation(dex, ledgerIn));
+    ensures localObligation(dex, ledgerOut) == old(localObligation(dex, ledgerOut));
+    ensures pendingOut(dex, ledgerIn) == old(pendingOut(dex, ledgerIn));
+    ensures pendingOut(dex, ledgerOut) == old(pendingOut(dex, ledgerOut));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.ok == (receipt.amountOut >= minAmountOut) and
+        receipt.reserveIn > 0 and
+        receipt.reserveOut > 0 and
+        receipt.amountOut <= receipt.reserveOut and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveIn, receipt.reserveOut, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (amountIn == 0) {
+      return #err(#zeroAmount)
+    };
+    if (ledgerIn == ledgerOut) {
+      return #err(#sameLedger)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerIn)) {
+      return #err(#ledgerNotActive ledgerIn)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerOut)) {
+      return #err(#ledgerNotActive ledgerOut)
+    };
+    PoolRegistry.quote(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  public func swap(
+    dex : State,
+    caller : Principal,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.SwapReceipt, Types.SwapError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures ledgerNet(dex, ledgerIn) == old(ledgerNet(dex, ledgerIn));
+    ensures ledgerNet(dex, ledgerOut) == old(ledgerNet(dex, ledgerOut));
+    ensures switch (result) {
+      case (#ok(_)) { true };
+      case (#err(_)) {
+        localBalance(dex, caller, AssetKey.ledger(ledgerIn)) ==
+          old(localBalance(dex, caller, AssetKey.ledger(ledgerIn)))
+      }
+    };
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.reserveInBefore > 0 and
+        receipt.reserveOutBefore > 0 and
+        receipt.amountOut > 0 and
+        receipt.amountOut >= minAmountOut and
+        receipt.amountOut < receipt.reserveOutBefore and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveInBefore, receipt.reserveOutBefore, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn and
+        receipt.reserveInAfter == receipt.reserveInBefore + receipt.effectiveAmountIn + receipt.lpFee and
+        receipt.reserveOutAfter + receipt.amountOut == receipt.reserveOutBefore
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (amountIn == 0) {
+      return #err(#zeroAmount)
+    };
+    if (ledgerIn == ledgerOut) {
+      return #err(#sameLedger)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerIn)) {
+      return #err(#ledgerNotActive ledgerIn)
+    };
+    if (not LedgerSet.isActive(dex.ledgers, ledgerOut)) {
+      return #err(#ledgerNotActive ledgerOut)
+    };
+    switch (PoolRegistry.planSwap(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut)) {
+      case (#err err) { #err(err) };
+      case (#ok plan) {
+        let inputKey = AssetKey.ledger(ledgerIn);
+        let inputBalanceBefore = localBalance(dex, caller, inputKey);
+        assert inputBalanceBefore == old(localBalance(dex, caller, inputKey));
+        if (BalanceBook.get(dex.balances, caller, inputKey) < amountIn) {
+          #err(#insufficientLocalBalance)
+        } else {
+          let debited = BalanceBook.debit(dex.balances, caller, inputKey, amountIn);
+          if (not debited) {
+            return #err(#insufficientLocalBalance)
+          };
+          assert localBalance(dex, caller, inputKey) + amountIn == inputBalanceBefore;
+          switch (PoolRegistry.applySwap(dex.pools, plan)) {
+            case null {
+              BalanceBook.credit(dex.balances, caller, inputKey, amountIn);
+              assert localBalance(dex, caller, inputKey) == inputBalanceBefore;
+              #err(#poolNotFound)
+            };
+            case (?receipt) {
+              BalanceBook.credit(dex.balances, caller, AssetKey.ledger(ledgerOut), receipt.amountOut);
+              BalanceBook.credit(dex.balances, dex.controller, inputKey, receipt.platformFee);
+              #ok(receipt)
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public func liquidity(
+    dex : State,
+    caller : Principal,
+    request : Types.LiquidityRequest
+  ) : Types.Result<Types.LiquidityReceipt, Types.LiquidityError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (request) {
+      case (#add req) {
+        ledgerNet(dex, req.ledgerA) == old(ledgerNet(dex, req.ledgerA)) and
+        ledgerNet(dex, req.ledgerB) == old(ledgerNet(dex, req.ledgerB))
+      };
+      case (#rem req) {
+        ledgerNet(dex, req.ledgerA) == old(ledgerNet(dex, req.ledgerA)) and
+        ledgerNet(dex, req.ledgerB) == old(ledgerNet(dex, req.ledgerB))
+      }
+    };
+    ensures switch (result) {
+      case (#ok(#added receipt)) {
+        receipt.shares > 0 and
+        (
+          receipt.lockedShares == 0 or
+          receipt.lockedShares == AmmMath.minimumLiquidity()
+        ) and
+        (
+          (
+            BalanceBook.recordKey(caller, receipt.poolKey) !=
+              BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+            BalanceBook.recordKey(caller, receipt.poolKey) !=
+              BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+          ) ==>
+            localBalance(dex, caller, receipt.poolKey) ==
+              old(localBalance(dex, caller, receipt.poolKey)) + receipt.shares
+        )
+      };
+      case (#ok(#removed receipt)) {
+        receipt.shares > 0 and
+        (
+          (
+            BalanceBook.recordKey(caller, receipt.poolKey) !=
+              BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+            BalanceBook.recordKey(caller, receipt.poolKey) !=
+              BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+          ) ==>
+            localBalance(dex, caller, receipt.poolKey) + receipt.shares ==
+              old(localBalance(dex, caller, receipt.poolKey))
+        )
+      };
+      case (#err(_)) { true }
+    };
+    ensures switch (request) {
+      case (#add req) {
+        switch (result) {
+          case (#ok(#added receipt)) {
+            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
+            receipt.usedA > 0 and
+            receipt.usedB > 0 and
+            receipt.shares >= req.minShares and
+            (
+              receipt.lockedShares == 0 or
+              receipt.lockedShares == AmmMath.minimumLiquidity()
+            ) and
+            receipt.usedA + receipt.leftoverA ==
+              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountA } else { req.maxAmountB }) and
+            receipt.usedB + receipt.leftoverB ==
+              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountB } else { req.maxAmountA })
+          };
+          case _ { true }
+        }
+      };
+      case (#rem req) {
+        switch (result) {
+          case (#ok(#removed receipt)) {
+            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
+            receipt.shares == req.shares and
+            receipt.amountA >=
+              (if (receipt.ledgerA == req.ledgerA) { req.minAmountA } else { req.minAmountB }) and
+            receipt.amountB >=
+              (if (receipt.ledgerA == req.ledgerA) { req.minAmountB } else { req.minAmountA })
+          };
+          case _ { true }
+        }
+      }
+    };
+  {
+    switch (request) {
+      case (#add req) {
+        if (req.maxAmountA == 0 or req.maxAmountB == 0) {
+          return #err(#zeroAmount)
+        };
+        if (req.ledgerA == req.ledgerB) {
+          return #err(#sameLedger)
+        };
+        if (not LedgerSet.isActive(dex.ledgers, req.ledgerA)) {
+          return #err(#ledgerNotActive(req.ledgerA))
+        };
+        if (not LedgerSet.isActive(dex.ledgers, req.ledgerB)) {
+          return #err(#ledgerNotActive(req.ledgerB))
+        };
+        switch (PoolRegistry.planAdd(
+          dex.pools,
+          req.ledgerA,
+          req.ledgerB,
+          req.maxAmountA,
+          req.maxAmountB,
+          req.minShares
+        )) {
+          case (#err err) { #err(err) };
+          case (#ok plan) {
+            assert plan.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB);
+            let keyA = AssetKey.ledger(plan.ledgerA);
+            let keyB = AssetKey.ledger(plan.ledgerB);
+            let poolBalanceBefore = localBalance(dex, caller, plan.poolKey);
+            assert poolBalanceBefore == old(localBalance(dex, caller, plan.poolKey));
+            if (
+              BalanceBook.get(dex.balances, caller, keyA) < plan.usedA or
+              BalanceBook.get(dex.balances, caller, keyB) < plan.usedB
+            ) {
+              #err(#insufficientLocalBalance)
+            } else {
+              ignore BalanceBook.debit(dex.balances, caller, keyA, plan.usedA);
+              if (
+                BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA)
+              ) {
+                assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore
+              };
+              ignore BalanceBook.debit(dex.balances, caller, keyB, plan.usedB);
+              if (
+                BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA) and
+                BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyB)
+              ) {
+                assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore
+              };
+              switch (PoolRegistry.applyAdd(dex.pools, plan)) {
+                case null {
+                  BalanceBook.credit(dex.balances, caller, keyA, plan.usedA);
+                  BalanceBook.credit(dex.balances, caller, keyB, plan.usedB);
+                  if (
+                    BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA) and
+                    BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyB)
+                  ) {
+                    assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore
+                  };
+                  #err(#poolNotFound)
+                };
+                case (?receipt) {
+                  BalanceBook.credit(dex.balances, caller, plan.poolKey, plan.shares);
+                  if (
+                    BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA) and
+                    BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyB)
+                  ) {
+                    assert localBalance(dex, caller, plan.poolKey) ==
+                      poolBalanceBefore + plan.shares
+                  };
+                  #ok(#added receipt)
+                }
+              }
+            }
+          }
+        }
+      };
+      case (#rem req) {
+        if (req.shares == 0) {
+          return #err(#zeroAmount)
+        };
+        if (req.ledgerA == req.ledgerB) {
+          return #err(#sameLedger)
+        };
+        if (not LedgerSet.isListed(dex.ledgers, req.ledgerA)) {
+          return #err(#ledgerNotWhitelisted(req.ledgerA))
+        };
+        if (not LedgerSet.isListed(dex.ledgers, req.ledgerB)) {
+          return #err(#ledgerNotWhitelisted(req.ledgerB))
+        };
+        switch (PoolRegistry.planRemove(
+          dex.pools,
+          req.ledgerA,
+          req.ledgerB,
+          req.shares,
+          req.minAmountA,
+          req.minAmountB
+        )) {
+          case (#err err) { #err(err) };
+          case (#ok plan) {
+            assert plan.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB);
+            let poolBalanceBefore = localBalance(dex, caller, plan.poolKey);
+            assert poolBalanceBefore == old(localBalance(dex, caller, plan.poolKey));
+            if (BalanceBook.get(dex.balances, caller, plan.poolKey) < plan.shares) {
+              #err(#insufficientLocalBalance)
+            } else {
+              let debited = BalanceBook.debit(dex.balances, caller, plan.poolKey, plan.shares);
+              if (not debited) {
+                return #err(#insufficientLocalBalance)
+              };
+              assert localBalance(dex, caller, plan.poolKey) + plan.shares == poolBalanceBefore;
+              switch (PoolRegistry.applyRemove(dex.pools, plan)) {
+                case null {
+                  BalanceBook.credit(dex.balances, caller, plan.poolKey, plan.shares);
+                  assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore;
+                  #err(#poolNotFound)
+                };
+                case (?receipt) {
+                  BalanceBook.credit(dex.balances, caller, AssetKey.ledger(plan.ledgerA), plan.amountA);
+                  if (
+                    BalanceBook.recordKey(caller, plan.poolKey) !=
+                    BalanceBook.recordKey(caller, AssetKey.ledger(plan.ledgerA))
+                  ) {
+                    assert localBalance(dex, caller, plan.poolKey) + plan.shares == poolBalanceBefore
+                  };
+                  BalanceBook.credit(dex.balances, caller, AssetKey.ledger(plan.ledgerB), plan.amountB);
+                  if (
+                    BalanceBook.recordKey(caller, plan.poolKey) !=
+                      BalanceBook.recordKey(caller, AssetKey.ledger(plan.ledgerA)) and
+                    BalanceBook.recordKey(caller, plan.poolKey) !=
+                      BalanceBook.recordKey(caller, AssetKey.ledger(plan.ledgerB))
+                  ) {
+                    assert localBalance(dex, caller, plan.poolKey) + plan.shares == poolBalanceBefore
+                  };
+                  #ok(#removed receipt)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+}

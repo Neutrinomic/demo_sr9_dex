@@ -1,0 +1,260 @@
+import BMap "mo:core/pure/BMap";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+import Types "./Types";
+
+module {
+  public type RecordKey = Text;
+
+  public type PendingReturns = opaque {
+    var localBalances : BMap.BMap<Text, Nat>;
+    var fees : BMap.BMap<Text, Nat>;
+    var returnedAmounts : BMap.BMap<Text, Nat>;
+    var totals : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(localBalances, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(fees, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(returnedAmounts, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(totals, Text.compare)
+  };
+
+  public ghost func model(_pending : PendingReturns) : Nat
+    requires true;
+    ensures result == 0;
+  {
+    0
+  };
+
+  public ghost func localBalanceValue(pending : PendingReturns, user : Principal, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.localBalances),
+      recordKey(user, ledgerKey),
+      0
+    );
+  {
+    Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.localBalances),
+      recordKey(user, ledgerKey),
+      0
+    )
+  };
+
+  public ghost func totalValue(pending : PendingReturns, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.totals),
+      ledgerKey,
+      0
+    );
+  {
+    Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.totals),
+      ledgerKey,
+      0
+    )
+  };
+
+  private pure func mapGetRecord(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private pure func mapGetLedger(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private func putRecord(
+    map : BMap.BMap<Text, Nat>,
+    key : Text,
+    value : Nat
+  ) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  private func putLedger(map : BMap.BMap<Text, Nat>, key : Text, value : Nat) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  public pure func recordKey(user : Principal, ledgerKey : Text) : Text
+    requires true;
+    ensures result == Principal.toText(user) # ":" # ledgerKey;
+  {
+    Principal.toText(user) # ":" # ledgerKey
+  };
+
+  public func empty() : PendingReturns
+    requires true;
+    ensures forall<Text>(pure func (ledgerKey : Text) : Bool =
+      totalValue(result, ledgerKey) == 0);
+  {
+    let localBalances = BMap.empty<Text, Nat>();
+    let fees = BMap.empty<Text, Nat>();
+    let returnedAmounts = BMap.empty<Text, Nat>();
+    let totals = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var localBalances = localBalances;
+      var fees = fees;
+      var returnedAmounts = returnedAmounts;
+      var totals = totals
+    }
+  };
+
+  public pure func get(
+    pending : PendingReturns,
+    user : Principal,
+    ledgerKey : Text
+  ) : ?Types.PendingReturn
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?record) { record.localBalance > 0 }
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    let localBalance = mapGetRecord(pending.localBalances, key);
+    if (localBalance == 0) {
+      null
+    } else {
+      ?{
+        localBalance = localBalance;
+        fee = mapGetRecord(pending.fees, key);
+        returnedAmount = mapGetRecord(pending.returnedAmounts, key)
+      }
+    }
+  };
+
+  public pure func total(pending : PendingReturns, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == totalValue(pending, ledgerKey);
+  {
+    mapGetLedger(pending.totals, ledgerKey)
+  };
+
+  public pure func localBalanceAmount(
+    pending : PendingReturns,
+    user : Principal,
+    ledgerKey : Text
+  ) : Nat
+    requires true;
+    ensures result == localBalanceValue(pending, user, ledgerKey);
+  {
+    mapGetRecord(pending.localBalances, recordKey(user, ledgerKey))
+  };
+
+  public pure func hasLedger(pending : PendingReturns, ledgerKey : Text) : Bool
+    requires true;
+    ensures result == (total(pending, ledgerKey) > 0);
+  {
+    total(pending, ledgerKey) > 0
+  };
+
+  public func begin(
+    pending : PendingReturns,
+    user : Principal,
+    ledgerKey : Text,
+    record : Types.PendingReturn
+  ) : Bool
+    requires true;
+    requires record.returnedAmount + record.fee == record.localBalance;
+    ensures if (result) {
+      localBalanceValue(pending, user, ledgerKey) == record.localBalance and
+      totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey)) + record.localBalance
+    } else {
+      localBalanceValue(pending, user, ledgerKey) == old(localBalanceValue(pending, user, ledgerKey)) and
+      totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey))
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    if (mapGetRecord(pending.localBalances, key) > 0) {
+      return false
+    };
+    assert BMap.orderedBy<Text, Nat>(pending.localBalances, Text.compare);
+    pending.localBalances := putRecord(pending.localBalances, key, record.localBalance);
+    assert BMap.orderedBy<Text, Nat>(pending.fees, Text.compare);
+    pending.fees := putRecord(pending.fees, key, record.fee);
+    assert BMap.orderedBy<Text, Nat>(pending.returnedAmounts, Text.compare);
+    pending.returnedAmounts := putRecord(pending.returnedAmounts, key, record.returnedAmount);
+    let currentTotal = mapGetLedger(pending.totals, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
+    pending.totals := putLedger(pending.totals, ledgerKey, currentTotal + record.localBalance);
+    true
+  };
+
+  public func take(
+    pending : PendingReturns,
+    user : Principal,
+    ledgerKey : Text
+  ) : ?Types.PendingReturn
+    requires true;
+    ensures switch (result) {
+      case null {
+        old(localBalanceAmount(pending, user, ledgerKey)) == 0 and
+        localBalanceAmount(pending, user, ledgerKey) == 0 and
+        old(localBalanceValue(pending, user, ledgerKey)) == 0 and
+        localBalanceValue(pending, user, ledgerKey) == 0 and
+        localBalanceValue(pending, user, ledgerKey) == old(localBalanceValue(pending, user, ledgerKey)) and
+        totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey))
+      };
+      case (?record) {
+        record.localBalance == old(localBalanceAmount(pending, user, ledgerKey)) and
+        localBalanceAmount(pending, user, ledgerKey) == 0 and
+        record.localBalance == old(localBalanceValue(pending, user, ledgerKey)) and
+        localBalanceValue(pending, user, ledgerKey) == 0 and
+        totalValue(pending, ledgerKey) <= old(totalValue(pending, ledgerKey)) and
+        (
+          old(totalValue(pending, ledgerKey)) >= record.localBalance ==>
+          totalValue(pending, ledgerKey) + record.localBalance ==
+            old(totalValue(pending, ledgerKey))
+        ) and
+        (
+          old(totalValue(pending, ledgerKey)) < record.localBalance ==>
+          totalValue(pending, ledgerKey) == 0
+        )
+      }
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    let localBalance = mapGetRecord(pending.localBalances, key);
+    if (localBalance == 0) {
+      null
+    } else {
+      let record = {
+        localBalance = localBalance;
+        fee = mapGetRecord(pending.fees, key);
+        returnedAmount = mapGetRecord(pending.returnedAmounts, key)
+      };
+      assert BMap.orderedBy<Text, Nat>(pending.localBalances, Text.compare);
+      pending.localBalances := putRecord(pending.localBalances, key, 0);
+      assert BMap.orderedBy<Text, Nat>(pending.fees, Text.compare);
+      pending.fees := putRecord(pending.fees, key, 0);
+      assert BMap.orderedBy<Text, Nat>(pending.returnedAmounts, Text.compare);
+      pending.returnedAmounts := putRecord(pending.returnedAmounts, key, 0);
+      let currentTotal = mapGetLedger(pending.totals, ledgerKey);
+      let nextTotal = if (currentTotal >= record.localBalance) {
+        currentTotal - record.localBalance
+      } else {
+        0
+      };
+      assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
+      pending.totals := putLedger(pending.totals, ledgerKey, nextTotal);
+      ?record
+    }
+  };
+}

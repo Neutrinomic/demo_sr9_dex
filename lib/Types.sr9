@@ -1,0 +1,304 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+
+module {
+  public type Result<Ok, Err> = { #ok : Ok; #err : Err };
+
+  public type LedgerReject = {
+    message : Text
+  };
+
+  public type LedgerStatus = { #active; #retiring };
+
+  public type LedgerInfo = {
+    status : LedgerStatus;
+    fee : Nat
+  };
+
+  public type ControllerLedgerAction = {
+    #add : Principal;
+    #retire : Principal;
+    #rem : Principal
+  };
+
+  public type PoolInfo = {
+    id : Nat;
+    key : Text;
+    ledgerA : Principal;
+    ledgerB : Principal;
+    reserveA : Nat;
+    reserveB : Nat;
+    totalShares : Nat;
+    lockedShares : Nat
+  };
+
+  public type SwapFees = {
+    fee : Nat;
+    platformFee : Nat;
+    lpFee : Nat;
+    effectiveAmountIn : Nat
+  };
+
+  public type QuoteReceipt = {
+    ledgerIn : Principal;
+    ledgerOut : Principal;
+    amountIn : Nat;
+    fee : Nat;
+    platformFee : Nat;
+    lpFee : Nat;
+    effectiveAmountIn : Nat;
+    amountOut : Nat;
+    minAmountOut : Nat;
+    reserveIn : Nat;
+    reserveOut : Nat;
+    ok : Bool
+  };
+
+  public type SwapReceipt = {
+    ledgerIn : Principal;
+    ledgerOut : Principal;
+    amountIn : Nat;
+    fee : Nat;
+    platformFee : Nat;
+    lpFee : Nat;
+    effectiveAmountIn : Nat;
+    amountOut : Nat;
+    minAmountOut : Nat;
+    reserveInBefore : Nat;
+    reserveOutBefore : Nat;
+    reserveInAfter : Nat;
+    reserveOutAfter : Nat
+  };
+
+  public type AddLiquidityReceipt = {
+    ledgerA : Principal;
+    ledgerB : Principal;
+    usedA : Nat;
+    usedB : Nat;
+    leftoverA : Nat;
+    leftoverB : Nat;
+    shares : Nat;
+    lockedShares : Nat;
+    poolKey : Text
+  };
+
+  public type RemoveLiquidityReceipt = {
+    ledgerA : Principal;
+    ledgerB : Principal;
+    shares : Nat;
+    amountA : Nat;
+    amountB : Nat;
+    poolKey : Text
+  };
+
+  public type LiquidityReceipt = {
+    #added : AddLiquidityReceipt;
+    #removed : RemoveLiquidityReceipt
+  };
+
+  public type LiquidityRequest = {
+    #add : {
+      ledgerA : Principal;
+      ledgerB : Principal;
+      maxAmountA : Nat;
+      maxAmountB : Nat;
+      minShares : Nat
+    };
+    #rem : {
+      ledgerA : Principal;
+      ledgerB : Principal;
+      shares : Nat;
+      minAmountA : Nat;
+      minAmountB : Nat
+    }
+  };
+
+  public type DepositReceipt = {
+    ledger : Principal;
+    amount : Nat;
+    txIndex : Nat;
+    balanceKey : Text
+  };
+
+  public type WithdrawReceipt = {
+    ledger : Principal;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    txIndex : Nat;
+    balanceKey : Text
+  };
+
+  public type RemovePoolReceipt = {
+    key : Text;
+    ledgerA : Principal;
+    ledgerB : Principal;
+    settledUsers : Nat;
+    burnedUserShares : Nat;
+    burnedLockedShares : Nat;
+    returnedA : Nat;
+    returnedB : Nat;
+    controllerLockedA : Nat;
+    controllerLockedB : Nat
+  };
+
+  public type ReturnLedgerBalancesReceipt = {
+    ledger : Principal;
+    returnedUsers : Nat;
+    returnedUser : ?Principal;
+    localBalance : Nat;
+    fee : Nat;
+    returnedAmount : Nat;
+    txIndex : ?Nat;
+    remainingLocalBalance : Nat
+  };
+
+  public type DepositError = {
+    #ledgerNotActive : Principal;
+    #zeroAmount;
+    #ledgerTransferFromErr : ICRCLedger.TransferFromError;
+    #ledgerTransferFromRejected : LedgerReject
+  };
+
+  public type WithdrawError = {
+    #ledgerNotWhitelisted : Principal;
+    #zeroAmount;
+    #withdrawInProgress;
+    #insufficientLocalBalance;
+    #ledgerTransferErr : ICRCLedger.TransferError;
+    #ledgerTransferRejected : LedgerReject
+  };
+
+  public type QuoteError = {
+    #ledgerNotActive : Principal;
+    #sameLedger;
+    #poolNotFound;
+    #zeroAmount;
+    #insufficientLiquidity
+  };
+
+  public type SwapError = {
+    #ledgerNotActive : Principal;
+    #sameLedger;
+    #poolNotFound;
+    #zeroAmount;
+    #insufficientLocalBalance;
+    #insufficientLiquidity;
+    #slippage
+  };
+
+  public type LiquidityError = {
+    #ledgerNotActive : Principal;
+    #ledgerNotWhitelisted : Principal;
+    #sameLedger;
+    #poolNotFound;
+    #zeroAmount;
+    #insufficientLocalBalance;
+    #insufficientLiquidity;
+    #slippage
+  };
+
+  public type CreatePoolError = {
+    #notController;
+    #ledgerNotActive : Principal;
+    #sameLedger;
+    #poolAlreadyExists
+  };
+
+  public type RemovePoolError = {
+    #notController;
+    #sameLedger;
+    #poolNotFound
+  };
+
+  public type ReturnLedgerBalancesError = {
+    #notController;
+    #ledgerNotWhitelisted : Principal;
+    #ledgerNotRetiring : Principal;
+    #ledgerHasPools : Principal;
+    #ledgerHasPendingOps : Principal;
+    #returnBalanceDoesNotCoverFee : { balance : Nat; fee : Nat };
+    #ledgerTransferErr : ICRCLedger.TransferError;
+    #ledgerTransferRejected : LedgerReject
+  };
+
+  public type ControllerLedgerError = {
+    #notController;
+    #ledgerAlreadyActive : Principal;
+    #ledgerAlreadyRetiring : Principal;
+    #ledgerNotWhitelisted : Principal;
+    #ledgerNotRetiring : Principal;
+    #ledgerHasPools : Principal;
+    #ledgerHasLocalBalances : Principal;
+    #ledgerHasPendingOps : Principal;
+    #ledgerFeeRejected : LedgerReject
+  };
+
+  public type WithdrawStarted = {
+    ledger : Principal;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    balanceKey : Text
+  };
+
+  public type ReturnStarted = {
+    #none : ReturnLedgerBalancesReceipt;
+    #some : {
+      ledger : Principal;
+      user : Principal;
+      localBalance : Nat;
+      fee : Nat;
+      returnedAmount : Nat;
+      balanceKey : Text
+    }
+  };
+
+  public type PendingWithdrawal = {
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat
+  };
+
+  public type PendingReturn = {
+    localBalance : Nat;
+    fee : Nat;
+    returnedAmount : Nat
+  };
+
+  public type SwapPlan = {
+    poolKey : Text;
+    ledgerIn : Principal;
+    ledgerOut : Principal;
+    inputIsA : Bool;
+    amountIn : Nat;
+    amountOut : Nat;
+    minAmountOut : Nat;
+    fee : Nat;
+    platformFee : Nat;
+    lpFee : Nat;
+    effectiveAmountIn : Nat;
+    reserveInBefore : Nat;
+    reserveOutBefore : Nat
+  };
+
+  public type AddLiquidityPlan = {
+    poolKey : Text;
+    ledgerA : Principal;
+    ledgerB : Principal;
+    usedA : Nat;
+    usedB : Nat;
+    leftoverA : Nat;
+    leftoverB : Nat;
+    shares : Nat;
+    lockedSharesAdded : Nat
+  };
+
+  public type RemoveLiquidityPlan = {
+    poolKey : Text;
+    ledgerA : Principal;
+    ledgerB : Principal;
+    shares : Nat;
+    amountA : Nat;
+    amountB : Nat
+  };
+}

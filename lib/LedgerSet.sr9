@@ -1,0 +1,218 @@
+import BMap "mo:core/pure/BMap";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+import Types "./Types";
+
+module {
+  public type Status = { #absent; #active; #retiring };
+
+  public type LedgerSet = opaque {
+    // 1 = active, 2 = retiring. Missing or 0 means absent.
+    var statuses : BMap.BMap<Text, Nat>;
+    var fees : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(statuses, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(fees, Text.compare)
+  };
+
+  public ghost func model(ledgers : LedgerSet) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(ledgers.statuses);
+  {
+    BMap.Spec.model<Text, Nat>(ledgers.statuses)
+  };
+
+  private pure func key(ledger : Principal) : Text {
+    Principal.toText(ledger)
+  };
+
+  private pure func mapGet(map : BMap.BMap<Text, Nat>, k : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, k)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private pure func statusNat(status : Types.LedgerStatus) : Nat {
+    switch status {
+      case (#active) { 1 };
+      case (#retiring) { 2 }
+    }
+  };
+
+  public func empty() : LedgerSet
+    requires true;
+  {
+    let statuses = BMap.empty<Text, Nat>();
+    let fees = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var statuses = statuses;
+      var fees = fees
+    }
+  };
+
+  public func status(ledgers : LedgerSet, ledger : Principal) : Status
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+    ensures result != #absent ==> Map.contains<Text, Nat>(key(ledger), model(ledgers));
+  {
+    switch (BMap.get<Text, Nat>(ledgers.statuses, Text.compare, key(ledger))) {
+      case (?1) { #active };
+      case (?2) { #retiring };
+      case _ { #absent }
+    }
+  };
+
+  public func info(ledgers : LedgerSet, ledger : Principal) : ?Types.LedgerInfo
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    switch (status(ledgers, ledger)) {
+      case (#absent) { null };
+      case (#active) { ?{ status = #active; fee = mapGet(ledgers.fees, key(ledger)) } };
+      case (#retiring) { ?{ status = #retiring; fee = mapGet(ledgers.fees, key(ledger)) } }
+    }
+  };
+
+  public func isListed(ledgers : LedgerSet, ledger : Principal) : Bool
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    status(ledgers, ledger) != #absent
+  };
+
+  public func isActive(ledgers : LedgerSet, ledger : Principal) : Bool
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    status(ledgers, ledger) == #active
+  };
+
+  public func isRetiring(ledgers : LedgerSet, ledger : Principal) : Bool
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    status(ledgers, ledger) == #retiring
+  };
+
+  public func cachedFee(ledgers : LedgerSet, ledger : Principal) : ?Nat
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    if (isListed(ledgers, ledger)) {
+      ?mapGet(ledgers.fees, key(ledger))
+    } else {
+      null
+    }
+  };
+
+  private func putStatus(ledgers : LedgerSet, ledger : Principal, status : Types.LedgerStatus) : ()
+    requires true;
+    ensures Map.contains<Text, Nat>(key(ledger), model(ledgers));
+  {
+    let k = key(ledger);
+    assert BMap.orderedBy<Text, Nat>(ledgers.statuses, Text.compare);
+    let nextStatuses = BMap.add<Text, Nat>(ledgers.statuses, Text.compare, k, statusNat(status));
+    assert BMap.orderedBy<Text, Nat>(nextStatuses, Text.compare);
+    ledgers.statuses := nextStatuses
+  };
+
+  private func putFee(ledgers : LedgerSet, ledger : Principal, fee : Nat) : ()
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    let k = key(ledger);
+    assert BMap.orderedBy<Text, Nat>(ledgers.fees, Text.compare);
+    let nextFees = BMap.add<Text, Nat>(ledgers.fees, Text.compare, k, fee);
+    assert BMap.orderedBy<Text, Nat>(nextFees, Text.compare);
+    ledgers.fees := nextFees
+  };
+
+  private func clear(ledgers : LedgerSet, ledger : Principal) : ()
+    requires true;
+    ensures Map.contains<Text, Nat>(key(ledger), model(ledgers));
+  {
+    let k = key(ledger);
+    assert BMap.orderedBy<Text, Nat>(ledgers.statuses, Text.compare);
+    let nextStatuses = BMap.add<Text, Nat>(ledgers.statuses, Text.compare, k, 0);
+    assert BMap.orderedBy<Text, Nat>(nextStatuses, Text.compare);
+    ledgers.statuses := nextStatuses;
+    assert BMap.orderedBy<Text, Nat>(ledgers.fees, Text.compare);
+    let nextFees = BMap.add<Text, Nat>(ledgers.fees, Text.compare, k, 0);
+    assert BMap.orderedBy<Text, Nat>(nextFees, Text.compare);
+    ledgers.fees := nextFees
+  };
+
+  public func add(
+    ledgers : LedgerSet,
+    ledger : Principal,
+    fee : Nat
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures switch (result) {
+      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#err(_)) { true }
+    };
+  {
+    switch (status(ledgers, ledger)) {
+      case (#active) { #err(#ledgerAlreadyActive ledger) };
+      case (#retiring) { #err(#ledgerAlreadyRetiring ledger) };
+      case (#absent) {
+        putStatus(ledgers, ledger, #active);
+        putFee(ledgers, ledger, fee);
+        #ok(())
+      }
+    }
+  };
+
+  public func retire(
+    ledgers : LedgerSet,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures switch (result) {
+      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#err(_)) { true }
+    };
+  {
+    switch (status(ledgers, ledger)) {
+      case (#absent) { #err(#ledgerNotWhitelisted ledger) };
+      case (#retiring) { #ok(()) };
+      case (#active) {
+        putStatus(ledgers, ledger, #retiring);
+        #ok(())
+      }
+    }
+  };
+
+  public func rem(
+    ledgers : LedgerSet,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures switch (result) {
+      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#err(_)) { true }
+    };
+  {
+    switch (status(ledgers, ledger)) {
+      case (#absent) { #err(#ledgerNotWhitelisted ledger) };
+      case (#active) { #err(#ledgerNotRetiring ledger) };
+      case (#retiring) {
+        clear(ledgers, ledger);
+        #ok(())
+      }
+    }
+  };
+
+  public func refreshFee(ledgers : LedgerSet, ledger : Principal, expectedFee : Nat) : ()
+    requires true;
+    ensures model(ledgers) == old(model(ledgers));
+  {
+    if (isListed(ledgers, ledger)) {
+      putFee(ledgers, ledger, expectedFee)
+    }
+  };
+}

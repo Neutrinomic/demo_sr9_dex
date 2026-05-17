@@ -1,0 +1,597 @@
+import AmmMath "./AmmMath";
+import Types "./Types";
+
+module {
+  public type Model = {
+    id : Nat;
+    key : Text;
+    ledgerA : Principal;
+    ledgerB : Principal;
+    reserveA : Nat;
+    reserveB : Nat;
+    totalShares : Nat;
+    lockedShares : Nat
+  };
+
+  public type Pool = opaque {
+   id : Nat;
+   key : Text;
+   ledgerA : Principal;
+   ledgerB : Principal;
+   var reserveA : Nat;
+   var reserveB : Nat;
+   var totalShares : Nat;
+   var lockedShares : Nat;
+    invariant ledgerA != ledgerB;
+    invariant lockedShares <= totalShares;
+    invariant totalShares == 0 ==> lockedShares == 0;
+    invariant totalShares == 0 ==> reserveA == 0;
+    invariant totalShares == 0 ==> reserveB == 0;
+    invariant totalShares > 0 ==> reserveA > 0;
+    invariant totalShares > 0 ==> reserveB > 0
+  };
+
+  public pure func model(pool : Pool) : Model
+    requires true;
+    ensures result.id == pool.id;
+    ensures result.key == pool.key;
+    ensures result.ledgerA == pool.ledgerA;
+    ensures result.ledgerB == pool.ledgerB;
+    ensures result.reserveA == pool.reserveA;
+    ensures result.reserveB == pool.reserveB;
+    ensures result.totalShares == pool.totalShares;
+    ensures result.lockedShares == pool.lockedShares;
+  {
+    {
+      id = pool.id;
+      key = pool.key;
+      ledgerA = pool.ledgerA;
+      ledgerB = pool.ledgerB;
+      reserveA = pool.reserveA;
+      reserveB = pool.reserveB;
+      totalShares = pool.totalShares;
+      lockedShares = pool.lockedShares
+    }
+  };
+
+  public ghost func reserveA(pool : Pool) : Nat
+    requires true;
+    ensures result == model(pool).reserveA;
+  { model(pool).reserveA };
+
+  public ghost func reserveB(pool : Pool) : Nat
+    requires true;
+    ensures result == model(pool).reserveB;
+  { model(pool).reserveB };
+
+  public ghost func totalShares(pool : Pool) : Nat
+    requires true;
+    ensures result == model(pool).totalShares;
+  { model(pool).totalShares };
+
+  public ghost func lockedShares(pool : Pool) : Nat
+    requires true;
+    ensures result == model(pool).lockedShares;
+  { model(pool).lockedShares };
+
+  public func new(id : Nat, key : Text, ledgerA : Principal, ledgerB : Principal) : Pool
+    requires ledgerA != ledgerB;
+    ensures model(result).key == key;
+    ensures model(result).ledgerA == ledgerA;
+    ensures model(result).ledgerB == ledgerB;
+    ensures reserveA(result) == 0;
+    ensures reserveB(result) == 0;
+    ensures totalShares(result) == 0;
+    ensures lockedShares(result) == 0;
+  {
+    {
+      id = id;
+      key = key;
+      ledgerA = ledgerA;
+      ledgerB = ledgerB;
+      var reserveA = 0;
+      var reserveB = 0;
+      var totalShares = 0;
+      var lockedShares = 0
+    }
+  };
+
+  public func info(pool : Pool) : Types.PoolInfo
+    requires true;
+    ensures result == model(pool);
+    ensures result.key == model(pool).key;
+    ensures result.key == pool.key;
+    ensures result.ledgerA != result.ledgerB;
+    ensures result.lockedShares <= result.totalShares;
+    ensures result.totalShares == 0 ==> result.lockedShares == 0;
+    ensures result.totalShares == 0 ==> result.reserveA == 0;
+    ensures result.totalShares == 0 ==> result.reserveB == 0;
+    ensures result.totalShares > 0 ==> result.reserveA > 0;
+    ensures result.totalShares > 0 ==> result.reserveB > 0;
+    ensures model(pool) == old(model(pool));
+  {
+    {
+      id = pool.id;
+      key = pool.key;
+      ledgerA = pool.ledgerA;
+      ledgerB = pool.ledgerB;
+      reserveA = pool.reserveA;
+      reserveB = pool.reserveB;
+      totalShares = pool.totalShares;
+      lockedShares = pool.lockedShares
+    }
+  };
+
+  public pure func containsLedger(pool : Pool, ledger : Principal) : Bool
+    requires true;
+    ensures result == (model(pool).ledgerA == ledger or model(pool).ledgerB == ledger);
+  {
+    pool.ledgerA == ledger or pool.ledgerB == ledger
+  };
+
+  public func inputIsA(pool : Pool, ledgerIn : Principal, ledgerOut : Principal) : ?Bool
+    requires true;
+    ensures model(pool) == old(model(pool));
+  {
+    if (ledgerIn == pool.ledgerA and ledgerOut == pool.ledgerB) {
+      ?true
+    } else if (ledgerIn == pool.ledgerB and ledgerOut == pool.ledgerA) {
+      ?false
+    } else {
+      null
+    }
+  };
+
+  public func quoteExactIn(
+    pool : Pool,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.QuoteReceipt, Types.QuoteError>
+    requires amountIn > 0;
+    ensures model(pool) == old(model(pool));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.ok == (receipt.amountOut >= minAmountOut) and
+        receipt.reserveIn > 0 and
+        receipt.reserveOut > 0 and
+        receipt.amountOut <= receipt.reserveOut and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveIn, receipt.reserveOut, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    switch (inputIsA(pool, ledgerIn, ledgerOut)) {
+      case null { #err(#poolNotFound) };
+      case (?inA) {
+        let reserveIn = if (inA) { pool.reserveA } else { pool.reserveB };
+        let reserveOut = if (inA) { pool.reserveB } else { pool.reserveA };
+        if (pool.totalShares == 0 or reserveIn == 0 or reserveOut == 0) {
+          return #err(#insufficientLiquidity)
+        };
+        let fees = AmmMath.splitFees(amountIn);
+        let out = AmmMath.quoteExactIn(reserveIn, reserveOut, fees.effectiveAmountIn);
+        #ok({
+          ledgerIn = ledgerIn;
+          ledgerOut = ledgerOut;
+          amountIn = amountIn;
+          fee = fees.fee;
+          platformFee = fees.platformFee;
+          lpFee = fees.lpFee;
+          effectiveAmountIn = fees.effectiveAmountIn;
+          amountOut = out;
+          minAmountOut = minAmountOut;
+          reserveIn = reserveIn;
+          reserveOut = reserveOut;
+          ok = out >= minAmountOut
+        })
+      }
+    }
+  };
+
+  public func planSwap(
+    pool : Pool,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.SwapPlan, Types.SwapError>
+    requires amountIn > 0;
+    ensures model(pool) == old(model(pool));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.poolKey == model(pool).key and
+        plan.ledgerIn == ledgerIn and
+        plan.ledgerOut == ledgerOut and
+        plan.ledgerIn != plan.ledgerOut and
+        plan.amountIn == amountIn and
+        plan.minAmountOut == minAmountOut and
+        plan.reserveInBefore > 0 and
+        plan.reserveOutBefore > 0 and
+        plan.amountOut > 0 and
+        plan.amountOut >= minAmountOut and
+        plan.amountOut < plan.reserveOutBefore and
+        plan.amountOut ==
+          AmmMath.quoteExactIn(plan.reserveInBefore, plan.reserveOutBefore, plan.effectiveAmountIn) and
+        plan.platformFee + plan.lpFee == plan.fee and
+        plan.effectiveAmountIn + plan.platformFee + plan.lpFee == plan.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    switch (inputIsA(pool, ledgerIn, ledgerOut)) {
+      case null { #err(#poolNotFound) };
+      case (?inA) {
+        let reserveIn = if (inA) { pool.reserveA } else { pool.reserveB };
+        let reserveOut = if (inA) { pool.reserveB } else { pool.reserveA };
+        if (pool.totalShares == 0 or reserveIn == 0 or reserveOut == 0) {
+          return #err(#insufficientLiquidity)
+        };
+        let fees = AmmMath.splitFees(amountIn);
+        let out = AmmMath.quoteExactIn(reserveIn, reserveOut, fees.effectiveAmountIn);
+        if (out == 0 or out >= reserveOut) {
+          return #err(#insufficientLiquidity)
+        };
+        if (out < minAmountOut) {
+          return #err(#slippage)
+        };
+        #ok({
+          poolKey = pool.key;
+          ledgerIn = ledgerIn;
+          ledgerOut = ledgerOut;
+          inputIsA = inA;
+          amountIn = amountIn;
+          amountOut = out;
+          minAmountOut = minAmountOut;
+          fee = fees.fee;
+          platformFee = fees.platformFee;
+          lpFee = fees.lpFee;
+          effectiveAmountIn = fees.effectiveAmountIn;
+          reserveInBefore = reserveIn;
+          reserveOutBefore = reserveOut
+        })
+      }
+    }
+  };
+
+  public func applySwap(pool : Pool, plan : Types.SwapPlan) : ?Types.SwapReceipt
+    requires true;
+    requires plan.amountOut > 0;
+    requires plan.amountOut < plan.reserveOutBefore;
+    requires plan.amountOut ==
+      AmmMath.quoteExactIn(plan.reserveInBefore, plan.reserveOutBefore, plan.effectiveAmountIn);
+    requires plan.platformFee + plan.lpFee == plan.fee;
+    requires plan.effectiveAmountIn + plan.platformFee + plan.lpFee == plan.amountIn;
+    ensures switch (result) {
+      case null {
+        reserveA(pool) == old(reserveA(pool)) and
+        reserveB(pool) == old(reserveB(pool)) and
+        totalShares(pool) == old(totalShares(pool)) and
+        lockedShares(pool) == old(lockedShares(pool))
+      };
+      case (?_) {
+        totalShares(pool) == old(totalShares(pool)) and
+        lockedShares(pool) == old(lockedShares(pool))
+      }
+    };
+    ensures switch (result) {
+      case null { true };
+      case (?receipt) {
+        receipt.ledgerIn == plan.ledgerIn and
+        receipt.ledgerOut == plan.ledgerOut and
+        receipt.amountIn == plan.amountIn and
+        receipt.fee == plan.fee and
+        receipt.lpFee == plan.lpFee and
+        receipt.effectiveAmountIn == plan.effectiveAmountIn and
+        receipt.amountOut == plan.amountOut and
+        receipt.minAmountOut == plan.minAmountOut and
+        receipt.platformFee == plan.platformFee and
+        receipt.reserveInBefore == plan.reserveInBefore and
+        receipt.reserveOutBefore == plan.reserveOutBefore and
+        receipt.amountOut > 0 and
+        receipt.amountOut < receipt.reserveOutBefore and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveInBefore, receipt.reserveOutBefore, receipt.effectiveAmountIn) and
+        receipt.reserveInAfter == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee and
+        receipt.reserveOutAfter + plan.amountOut == plan.reserveOutBefore
+      }
+    };
+  {
+    let reserveDelta = plan.effectiveAmountIn + plan.lpFee;
+    let currentReserveIn = if (plan.inputIsA) { pool.reserveA } else { pool.reserveB };
+    let currentReserveOut = if (plan.inputIsA) { pool.reserveB } else { pool.reserveA };
+    if (
+      currentReserveIn != plan.reserveInBefore or
+      currentReserveOut != plan.reserveOutBefore
+    ) {
+      return null
+    };
+    if (plan.inputIsA) {
+      if (plan.amountOut >= pool.reserveB) {
+        return null
+      };
+      pool.reserveA += reserveDelta;
+      pool.reserveB -= plan.amountOut;
+      assert pool.reserveA == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee;
+      assert pool.reserveB + plan.amountOut == plan.reserveOutBefore;
+      ?{
+        ledgerIn = plan.ledgerIn;
+        ledgerOut = plan.ledgerOut;
+        amountIn = plan.amountIn;
+        fee = plan.fee;
+        platformFee = plan.platformFee;
+        lpFee = plan.lpFee;
+        effectiveAmountIn = plan.effectiveAmountIn;
+        amountOut = plan.amountOut;
+        minAmountOut = plan.minAmountOut;
+        reserveInBefore = plan.reserveInBefore;
+        reserveOutBefore = plan.reserveOutBefore;
+        reserveInAfter = pool.reserveA;
+        reserveOutAfter = pool.reserveB
+      }
+    } else {
+      if (plan.amountOut >= pool.reserveA) {
+        return null
+      };
+      pool.reserveB += reserveDelta;
+      pool.reserveA -= plan.amountOut;
+      assert pool.reserveB == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee;
+      assert pool.reserveA + plan.amountOut == plan.reserveOutBefore;
+      ?{
+        ledgerIn = plan.ledgerIn;
+        ledgerOut = plan.ledgerOut;
+        amountIn = plan.amountIn;
+        fee = plan.fee;
+        platformFee = plan.platformFee;
+        lpFee = plan.lpFee;
+        effectiveAmountIn = plan.effectiveAmountIn;
+        amountOut = plan.amountOut;
+        minAmountOut = plan.minAmountOut;
+        reserveInBefore = plan.reserveInBefore;
+        reserveOutBefore = plan.reserveOutBefore;
+        reserveInAfter = pool.reserveB;
+        reserveOutAfter = pool.reserveA
+      }
+    }
+  };
+
+  public func planAdd(
+    pool : Pool,
+    maxAmountA : Nat,
+    maxAmountB : Nat,
+    minShares : Nat
+  ) : Types.Result<Types.AddLiquidityPlan, Types.LiquidityError>
+    requires true;
+    ensures model(pool) == old(model(pool));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.poolKey == model(pool).key and
+        plan.ledgerA == model(pool).ledgerA and
+        plan.ledgerB == model(pool).ledgerB and
+        plan.ledgerA != plan.ledgerB and
+        plan.usedA > 0 and
+        plan.usedB > 0 and
+        plan.shares > 0 and
+        plan.shares >= minShares and
+        (
+          plan.lockedSharesAdded == 0 or
+          plan.lockedSharesAdded == AmmMath.minimumLiquidity()
+        ) and
+        plan.usedA + plan.leftoverA == maxAmountA and
+        plan.usedB + plan.leftoverB == maxAmountB and
+        (
+          old(totalShares(pool)) == 0 ==> plan.lockedSharesAdded == AmmMath.minimumLiquidity()
+        ) and
+        (
+          old(totalShares(pool)) > 0 ==>
+          plan.lockedSharesAdded == 0 and
+          plan.shares * old(reserveA(pool)) <= plan.usedA * old(totalShares(pool)) and
+          plan.shares * old(reserveB(pool)) <= plan.usedB * old(totalShares(pool))
+        )
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (maxAmountA == 0 or maxAmountB == 0) {
+      return #err(#zeroAmount)
+    };
+    let planned = if (pool.totalShares == 0) {
+      AmmMath.planInitialAdd(maxAmountA, maxAmountB, minShares)
+    } else {
+      AmmMath.planExistingAdd(
+        pool.reserveA,
+        pool.reserveB,
+        pool.totalShares,
+        maxAmountA,
+        maxAmountB,
+        minShares
+      )
+    };
+    switch (planned) {
+      case null { #err(#insufficientLiquidity) };
+      case (?p) {
+        #ok({
+          poolKey = pool.key;
+          ledgerA = pool.ledgerA;
+          ledgerB = pool.ledgerB;
+          usedA = p.usedA;
+          usedB = p.usedB;
+          leftoverA = maxAmountA - p.usedA;
+          leftoverB = maxAmountB - p.usedB;
+          shares = p.shares;
+          lockedSharesAdded = p.lockedSharesAdded
+        })
+      }
+    }
+  };
+
+  public func applyAdd(pool : Pool, plan : Types.AddLiquidityPlan) : Types.AddLiquidityReceipt
+    requires plan.poolKey == model(pool).key;
+    requires plan.ledgerA == model(pool).ledgerA;
+    requires plan.ledgerB == model(pool).ledgerB;
+    requires plan.usedA > 0;
+    requires plan.usedB > 0;
+    requires plan.shares + plan.lockedSharesAdded > 0;
+    requires plan.lockedSharesAdded == 0 or plan.lockedSharesAdded == AmmMath.minimumLiquidity();
+    ensures result.ledgerA == plan.ledgerA;
+    ensures result.ledgerB == plan.ledgerB;
+    ensures result.usedA == plan.usedA;
+    ensures result.usedB == plan.usedB;
+    ensures result.leftoverA == plan.leftoverA;
+    ensures result.leftoverB == plan.leftoverB;
+    ensures result.shares == plan.shares;
+    ensures result.lockedShares == plan.lockedSharesAdded;
+    ensures result.lockedShares == 0 or result.lockedShares == AmmMath.minimumLiquidity();
+    ensures result.poolKey == plan.poolKey;
+    ensures reserveA(pool) == old(reserveA(pool)) + plan.usedA;
+    ensures reserveB(pool) == old(reserveB(pool)) + plan.usedB;
+    ensures totalShares(pool) == old(totalShares(pool)) + plan.shares + plan.lockedSharesAdded;
+    ensures lockedShares(pool) == old(lockedShares(pool)) + plan.lockedSharesAdded;
+  {
+    pool.reserveA += plan.usedA;
+    pool.reserveB += plan.usedB;
+    pool.totalShares += plan.shares + plan.lockedSharesAdded;
+    pool.lockedShares += plan.lockedSharesAdded;
+    {
+      ledgerA = pool.ledgerA;
+      ledgerB = pool.ledgerB;
+      usedA = plan.usedA;
+      usedB = plan.usedB;
+      leftoverA = plan.leftoverA;
+      leftoverB = plan.leftoverB;
+      shares = plan.shares;
+      lockedShares = plan.lockedSharesAdded;
+      poolKey = pool.key
+    }
+  };
+
+  public func planRemove(
+    pool : Pool,
+    shares : Nat,
+    minAmountA : Nat,
+    minAmountB : Nat
+  ) : Types.Result<Types.RemoveLiquidityPlan, Types.LiquidityError>
+    requires true;
+    ensures model(pool) == old(model(pool));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.poolKey == model(pool).key and
+        plan.ledgerA == model(pool).ledgerA and
+        plan.ledgerB == model(pool).ledgerB and
+        plan.ledgerA != plan.ledgerB and
+        plan.shares == shares and
+        plan.shares > 0 and
+        plan.shares <= old(totalShares(pool)) and
+        plan.shares + old(lockedShares(pool)) <= old(totalShares(pool)) and
+        old(totalShares(pool)) > 0 and
+        plan.amountA >= minAmountA and
+        plan.amountB >= minAmountB and
+        plan.amountA <= old(reserveA(pool)) and
+        plan.amountB <= old(reserveB(pool)) and
+        plan.amountA * old(totalShares(pool)) <= plan.shares * old(reserveA(pool)) and
+        plan.amountB * old(totalShares(pool)) <= plan.shares * old(reserveB(pool))
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (shares == 0) {
+      return #err(#zeroAmount)
+    };
+    if (
+      pool.totalShares == 0 or
+      shares > pool.totalShares or
+      shares + pool.lockedShares > pool.totalShares
+    ) {
+      return #err(#insufficientLiquidity)
+    };
+    let amountA = (shares * pool.reserveA) / pool.totalShares;
+    let amountB = (shares * pool.reserveB) / pool.totalShares;
+    if (amountA < minAmountA or amountB < minAmountB) {
+      return #err(#slippage)
+    };
+    #ok({
+      poolKey = pool.key;
+      ledgerA = pool.ledgerA;
+      ledgerB = pool.ledgerB;
+      shares = shares;
+      amountA = amountA;
+      amountB = amountB
+    })
+  };
+
+  public func applyRemove(pool : Pool, plan : Types.RemoveLiquidityPlan) : ?Types.RemoveLiquidityReceipt
+    requires plan.poolKey == model(pool).key;
+    requires plan.ledgerA == model(pool).ledgerA;
+    requires plan.ledgerB == model(pool).ledgerB;
+    ensures switch (result) {
+      case null {
+        reserveA(pool) == old(reserveA(pool)) and
+        reserveB(pool) == old(reserveB(pool)) and
+        totalShares(pool) == old(totalShares(pool)) and
+        lockedShares(pool) == old(lockedShares(pool))
+      };
+      case (?_) {
+        reserveA(pool) == old(reserveA(pool)) - plan.amountA and
+        reserveB(pool) == old(reserveB(pool)) - plan.amountB and
+        totalShares(pool) == old(totalShares(pool)) - plan.shares and
+        reserveA(pool) + plan.amountA == old(reserveA(pool)) and
+        reserveB(pool) + plan.amountB == old(reserveB(pool)) and
+        totalShares(pool) + plan.shares == old(totalShares(pool)) and
+        plan.shares + old(lockedShares(pool)) <= old(totalShares(pool)) and
+        lockedShares(pool) == old(lockedShares(pool))
+      }
+    };
+    ensures switch (result) {
+      case null { true };
+      case (?receipt) {
+        receipt.ledgerA == plan.ledgerA and
+        receipt.ledgerB == plan.ledgerB and
+        receipt.shares == plan.shares and
+        receipt.amountA == plan.amountA and
+        receipt.amountB == plan.amountB and
+        receipt.poolKey == plan.poolKey
+      }
+    };
+  {
+    if (
+      plan.amountA > pool.reserveA or
+      plan.amountB > pool.reserveB or
+      plan.shares > pool.totalShares or
+      plan.shares + pool.lockedShares > pool.totalShares
+    ) {
+      return null
+    };
+    let remainingShares = pool.totalShares - plan.shares;
+    if (
+      remainingShares > 0 and
+      (plan.amountA >= pool.reserveA or plan.amountB >= pool.reserveB)
+    ) {
+      return null
+    };
+    if (
+      remainingShares == 0 and
+      (plan.amountA != pool.reserveA or plan.amountB != pool.reserveB)
+    ) {
+      return null
+    };
+    pool.reserveA -= plan.amountA;
+    pool.reserveB -= plan.amountB;
+    pool.totalShares -= plan.shares;
+    ?{
+      ledgerA = pool.ledgerA;
+      ledgerB = pool.ledgerB;
+      shares = plan.shares;
+      amountA = plan.amountA;
+      amountB = plan.amountB;
+      poolKey = pool.key
+    }
+  };
+}

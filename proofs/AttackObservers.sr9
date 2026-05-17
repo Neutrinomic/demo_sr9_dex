@@ -1,0 +1,592 @@
+import NatAxiom "mo:core/axiom/Nat";
+import Types "../lib/Types";
+
+module {
+  public type TargetDelta = {
+    spent : Nat;
+    received : Nat
+  };
+
+  public type PublicAction = {
+    #swap : Types.SwapReceipt;
+    #add : Types.AddLiquidityReceipt;
+    #rem : Types.RemoveLiquidityReceipt
+  };
+
+  public pure func spentOnly(amount : Nat) : TargetDelta
+    requires true;
+    ensures result.spent == amount;
+    ensures result.received == 0;
+  {
+    { spent = amount; received = 0 }
+  };
+
+  public pure func receivedOnly(amount : Nat) : TargetDelta
+    requires true;
+    ensures result.spent == 0;
+    ensures result.received == amount;
+  {
+    { spent = 0; received = amount }
+  };
+
+  public pure func swapInputTargetDelta(receipt : Types.SwapReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == receipt.amountIn;
+    ensures result.received == 0;
+  {
+    spentOnly(receipt.amountIn)
+  };
+
+  public pure func swapOutputTargetDelta(receipt : Types.SwapReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == 0;
+    ensures result.received == receipt.amountOut;
+  {
+    receivedOnly(receipt.amountOut)
+  };
+
+  public pure func addLedgerATargetDelta(receipt : Types.AddLiquidityReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == receipt.usedA;
+    ensures result.received == 0;
+  {
+    spentOnly(receipt.usedA)
+  };
+
+  public pure func addLedgerBTargetDelta(receipt : Types.AddLiquidityReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == receipt.usedB;
+    ensures result.received == 0;
+  {
+    spentOnly(receipt.usedB)
+  };
+
+  public pure func removeLedgerATargetDelta(receipt : Types.RemoveLiquidityReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == 0;
+    ensures result.received == receipt.amountA;
+  {
+    receivedOnly(receipt.amountA)
+  };
+
+  public pure func removeLedgerBTargetDelta(receipt : Types.RemoveLiquidityReceipt) : TargetDelta
+    requires true;
+    ensures result.spent == 0;
+    ensures result.received == receipt.amountB;
+  {
+    receivedOnly(receipt.amountB)
+  };
+
+  public pure func actionTargetDelta(action : PublicAction, targetLedger : Principal) : TargetDelta
+    requires true;
+  {
+    switch (action) {
+      case (#swap receipt) {
+        if (receipt.ledgerIn == targetLedger) {
+          spentOnly(receipt.amountIn)
+        } else if (receipt.ledgerOut == targetLedger) {
+          receivedOnly(receipt.amountOut)
+        } else {
+          { spent = 0; received = 0 }
+        }
+      };
+      case (#add receipt) {
+        if (receipt.ledgerA == targetLedger) {
+          spentOnly(receipt.usedA)
+        } else if (receipt.ledgerB == targetLedger) {
+          spentOnly(receipt.usedB)
+        } else {
+          { spent = 0; received = 0 }
+        }
+      };
+      case (#rem receipt) {
+        if (receipt.ledgerA == targetLedger) {
+          receivedOnly(receipt.amountA)
+        } else if (receipt.ledgerB == targetLedger) {
+          receivedOnly(receipt.amountB)
+        } else {
+          { spent = 0; received = 0 }
+        }
+      }
+    }
+  };
+
+  private func spendReceiveNoProfit(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    spent : Nat,
+    received : Nat
+  ) : ()
+    requires received <= spent;
+    requires afterTarget + spent == beforeTarget + received;
+    ensures afterTarget <= beforeTarget;
+  {
+    NatAxiom.addLeMonoLeft(received, spent, beforeTarget);
+    assert beforeTarget + received <= beforeTarget + spent;
+    assert afterTarget + spent <= beforeTarget + spent;
+    NatAxiom.addCancelRightLe(afterTarget, beforeTarget, spent);
+    assert afterTarget <= beforeTarget
+  };
+
+  public func closedLoopNoProfitDepth1(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    a0 : TargetDelta
+  ) : ()
+    requires a0.received <= a0.spent;
+    requires afterTarget + a0.spent == beforeTarget + a0.received;
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(beforeTarget, afterTarget, a0.spent, a0.received)
+  };
+
+  public func closedLoopNoProfitDepth2(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    a0 : TargetDelta,
+    a1 : TargetDelta
+  ) : ()
+    requires a0.received + a1.received <= a0.spent + a1.spent;
+    requires afterTarget + (a0.spent + a1.spent) ==
+      beforeTarget + (a0.received + a1.received);
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(
+      beforeTarget,
+      afterTarget,
+      a0.spent + a1.spent,
+      a0.received + a1.received
+    )
+  };
+
+  public func closedLoopNoProfitDepth3(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    a0 : TargetDelta,
+    a1 : TargetDelta,
+    a2 : TargetDelta
+  ) : ()
+    requires a0.received + a1.received + a2.received <=
+      a0.spent + a1.spent + a2.spent;
+    requires afterTarget + (a0.spent + a1.spent + a2.spent) ==
+      beforeTarget + (a0.received + a1.received + a2.received);
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(
+      beforeTarget,
+      afterTarget,
+      a0.spent + a1.spent + a2.spent,
+      a0.received + a1.received + a2.received
+    )
+  };
+
+  public func closedLoopNoProfitDepth4(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    a0 : TargetDelta,
+    a1 : TargetDelta,
+    a2 : TargetDelta,
+    a3 : TargetDelta
+  ) : ()
+    requires a0.received + a1.received + a2.received + a3.received <=
+      a0.spent + a1.spent + a2.spent + a3.spent;
+    requires afterTarget + (a0.spent + a1.spent + a2.spent + a3.spent) ==
+      beforeTarget + (a0.received + a1.received + a2.received + a3.received);
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(
+      beforeTarget,
+      afterTarget,
+      a0.spent + a1.spent + a2.spent + a3.spent,
+      a0.received + a1.received + a2.received + a3.received
+    )
+  };
+
+  public func publicActionClosedLoopNoProfitDepth1(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    targetLedger : Principal,
+    a0 : PublicAction
+  ) : ()
+    requires actionTargetDelta(a0, targetLedger).received <=
+      actionTargetDelta(a0, targetLedger).spent;
+    requires afterTarget + actionTargetDelta(a0, targetLedger).spent ==
+      beforeTarget + actionTargetDelta(a0, targetLedger).received;
+    ensures afterTarget <= beforeTarget;
+  {
+    let d0 = actionTargetDelta(a0, targetLedger);
+    closedLoopNoProfitDepth1(beforeTarget, afterTarget, d0)
+  };
+
+  public func publicActionClosedLoopNoProfitDepth2(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    targetLedger : Principal,
+    a0 : PublicAction,
+    a1 : PublicAction
+  ) : ()
+    requires actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received <=
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent;
+    requires afterTarget + (
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent
+    ) == beforeTarget + (
+      actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received
+    );
+    ensures afterTarget <= beforeTarget;
+  {
+    let d0 = actionTargetDelta(a0, targetLedger);
+    let d1 = actionTargetDelta(a1, targetLedger);
+    closedLoopNoProfitDepth2(beforeTarget, afterTarget, d0, d1)
+  };
+
+  public func publicActionClosedLoopNoProfitDepth3(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    targetLedger : Principal,
+    a0 : PublicAction,
+    a1 : PublicAction,
+    a2 : PublicAction
+  ) : ()
+    requires actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received <=
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent;
+    requires afterTarget + (
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent
+    ) == beforeTarget + (
+      actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received
+    );
+    ensures afterTarget <= beforeTarget;
+  {
+    let d0 = actionTargetDelta(a0, targetLedger);
+    let d1 = actionTargetDelta(a1, targetLedger);
+    let d2 = actionTargetDelta(a2, targetLedger);
+    closedLoopNoProfitDepth3(beforeTarget, afterTarget, d0, d1, d2)
+  };
+
+  public func publicActionClosedLoopNoProfitDepth4(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    targetLedger : Principal,
+    a0 : PublicAction,
+    a1 : PublicAction,
+    a2 : PublicAction,
+    a3 : PublicAction
+  ) : ()
+    requires actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received +
+      actionTargetDelta(a3, targetLedger).received <=
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent +
+      actionTargetDelta(a3, targetLedger).spent;
+    requires afterTarget + (
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent +
+      actionTargetDelta(a3, targetLedger).spent
+    ) == beforeTarget + (
+      actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received +
+      actionTargetDelta(a3, targetLedger).received
+    );
+    ensures afterTarget <= beforeTarget;
+  {
+    let d0 = actionTargetDelta(a0, targetLedger);
+    let d1 = actionTargetDelta(a1, targetLedger);
+    let d2 = actionTargetDelta(a2, targetLedger);
+    let d3 = actionTargetDelta(a3, targetLedger);
+    closedLoopNoProfitDepth4(beforeTarget, afterTarget, d0, d1, d2, d3)
+  };
+
+  // Receipt-level kernel for the same-pool swap round trip:
+  // first swap target A -> B, second swap B -> A, and the target-side pool
+  // reserve is restored. Under those closure facts, the user cannot receive
+  // more target token from the second swap than they spent in the first; the
+  // difference is the first swap's platform fee.
+  public func swapBackSamePoolSystemClosedNoProfit(
+    first : Types.SwapReceipt,
+    second : Types.SwapReceipt
+  ) : ()
+    requires first.ledgerIn == second.ledgerOut;
+    requires first.ledgerOut == second.ledgerIn;
+    requires first.ledgerIn != first.ledgerOut;
+    requires first.effectiveAmountIn + first.platformFee + first.lpFee == first.amountIn;
+    requires first.reserveInAfter == first.reserveInBefore + first.effectiveAmountIn + first.lpFee;
+    requires second.reserveOutAfter + second.amountOut == second.reserveOutBefore;
+    // In the second reverse swap, the output-side reserve is the first swap's
+    // input-side reserve. These are the same-pool/no-interleaving closure facts.
+    requires second.reserveOutBefore == first.reserveInAfter;
+    requires second.reserveOutAfter == first.reserveInBefore;
+    ensures second.amountOut + first.platformFee == first.amountIn;
+    ensures second.amountOut <= first.amountIn;
+  {
+    let effective = first.effectiveAmountIn;
+    let platform = first.platformFee;
+    let lp = first.lpFee;
+    let reserveDelta = effective + lp;
+
+    NatAxiom.addAssoc(effective, platform, lp);
+    NatAxiom.addComm(platform, lp);
+    NatAxiom.addAssoc(effective, lp, platform);
+    assert reserveDelta + platform == first.amountIn;
+
+    assert first.reserveInBefore + second.amountOut == second.reserveOutBefore;
+    assert first.reserveInBefore + second.amountOut == first.reserveInAfter;
+    assert first.reserveInBefore + second.amountOut == first.reserveInBefore + reserveDelta;
+    NatAxiom.addCancelLeftEq(second.amountOut, reserveDelta, first.reserveInBefore);
+    assert second.amountOut == reserveDelta;
+    assert second.amountOut + platform == first.amountIn;
+    NatAxiom.leAddRight(second.amountOut, platform);
+    assert second.amountOut <= first.amountIn
+  };
+
+  // Adds the public-user target-balance equation on top of the reserve kernel.
+  // `afterTarget + first.amountIn == beforeTarget + second.amountOut` is the
+  // closed local balance effect of spending target token in the first swap and
+  // receiving target token in the reverse swap, with no controller fee credit.
+  public func swapBackClosedTargetBalanceNoProfit(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    first : Types.SwapReceipt,
+    second : Types.SwapReceipt
+  ) : ()
+    requires first.ledgerIn == second.ledgerOut;
+    requires first.ledgerOut == second.ledgerIn;
+    requires first.ledgerIn != first.ledgerOut;
+    requires first.effectiveAmountIn + first.platformFee + first.lpFee == first.amountIn;
+    requires first.reserveInAfter == first.reserveInBefore + first.effectiveAmountIn + first.lpFee;
+    requires second.reserveOutAfter + second.amountOut == second.reserveOutBefore;
+    requires second.reserveOutBefore == first.reserveInAfter;
+    requires second.reserveOutAfter == first.reserveInBefore;
+    requires afterTarget + first.amountIn == beforeTarget + second.amountOut;
+    ensures afterTarget <= beforeTarget;
+  {
+    swapBackSamePoolSystemClosedNoProfit(first, second);
+    assert second.amountOut <= first.amountIn;
+    spendReceiveNoProfit(beforeTarget, afterTarget, first.amountIn, second.amountOut)
+  };
+
+  // Receipt-level kernel for add-liquidity followed by removing the same
+  // user-held shares. If the remove path returns no more of ledger A than the
+  // add path spent, the caller's ledger A balance cannot increase.
+  public func addRemoveClosedLedgerANoProfit(
+    beforeA : Nat,
+    afterA : Nat,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires removed.amountA <= added.usedA;
+    requires afterA + added.usedA == beforeA + removed.amountA;
+    ensures afterA <= beforeA;
+  {
+    spendReceiveNoProfit(beforeA, afterA, added.usedA, removed.amountA)
+  };
+
+  // Same add/remove kernel for ledger B.
+  public func addRemoveClosedLedgerBNoProfit(
+    beforeB : Nat,
+    afterB : Nat,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires removed.amountB <= added.usedB;
+    requires afterB + added.usedB == beforeB + removed.amountB;
+    ensures afterB <= beforeB;
+  {
+    spendReceiveNoProfit(beforeB, afterB, added.usedB, removed.amountB)
+  };
+
+  public func addRemoveClosedBothLedgersNoProfit(
+    beforeA : Nat,
+    afterA : Nat,
+    beforeB : Nat,
+    afterB : Nat,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires removed.amountA <= added.usedA;
+    requires removed.amountB <= added.usedB;
+    requires afterA + added.usedA == beforeA + removed.amountA;
+    requires afterB + added.usedB == beforeB + removed.amountB;
+    ensures afterA <= beforeA;
+    ensures afterB <= beforeB;
+  {
+    addRemoveClosedLedgerANoProfit(beforeA, afterA, added, removed);
+    addRemoveClosedLedgerBNoProfit(beforeB, afterB, added, removed)
+  };
+
+  // Depth-1 closed-loop kernels for actions that only spend the target token.
+  // They are useful base cases for symbolic action-list observers.
+  public func singleSwapInputNoProfit(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    swap : Types.SwapReceipt
+  ) : ()
+    requires afterTarget + swap.amountIn == beforeTarget + 0;
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(beforeTarget, afterTarget, swap.amountIn, 0)
+  };
+
+  public func singleAddLedgerANoProfit(
+    beforeA : Nat,
+    afterA : Nat,
+    added : Types.AddLiquidityReceipt
+  ) : ()
+    requires afterA + added.usedA == beforeA + 0;
+    ensures afterA <= beforeA;
+  {
+    spendReceiveNoProfit(beforeA, afterA, added.usedA, 0)
+  };
+
+  public func singleAddLedgerBNoProfit(
+    beforeB : Nat,
+    afterB : Nat,
+    added : Types.AddLiquidityReceipt
+  ) : ()
+    requires afterB + added.usedB == beforeB + 0;
+    ensures afterB <= beforeB;
+  {
+    spendReceiveNoProfit(beforeB, afterB, added.usedB, 0)
+  };
+
+  // Depth-3 same-pool kernel: spend the target token in a swap, spend it again
+  // while adding liquidity, then receive it while removing liquidity. If the
+  // received target amount is bounded by what was spent, the target balance
+  // cannot increase.
+  public func swapInputAddRemoveClosedLedgerANoProfit(
+    beforeA : Nat,
+    afterA : Nat,
+    swap : Types.SwapReceipt,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires swap.ledgerIn == added.ledgerA;
+    requires swap.ledgerOut == added.ledgerB;
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires removed.amountA <= swap.amountIn + added.usedA;
+    requires afterA + (swap.amountIn + added.usedA) == beforeA + removed.amountA;
+    ensures afterA <= beforeA;
+  {
+    spendReceiveNoProfit(
+      beforeA,
+      afterA,
+      swap.amountIn + added.usedA,
+      removed.amountA
+    )
+  };
+
+  public func swapInputAddRemoveClosedLedgerBNoProfit(
+    beforeB : Nat,
+    afterB : Nat,
+    swap : Types.SwapReceipt,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires swap.ledgerIn == added.ledgerB;
+    requires swap.ledgerOut == added.ledgerA;
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires removed.amountB <= swap.amountIn + added.usedB;
+    requires afterB + (swap.amountIn + added.usedB) == beforeB + removed.amountB;
+    ensures afterB <= beforeB;
+  {
+    spendReceiveNoProfit(
+      beforeB,
+      afterB,
+      swap.amountIn + added.usedB,
+      removed.amountB
+    )
+  };
+
+  // Depth-4 same-pool kernel: swap out of the target token, swap back into it,
+  // add liquidity, then remove the same shares. This captures a mixed
+  // swap/add/remove loop on one pool.
+  public func swapBackAddRemoveClosedLedgerANoProfit(
+    beforeA : Nat,
+    afterA : Nat,
+    first : Types.SwapReceipt,
+    second : Types.SwapReceipt,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires first.ledgerIn == added.ledgerA;
+    requires first.ledgerOut == added.ledgerB;
+    requires second.ledgerIn == first.ledgerOut;
+    requires second.ledgerOut == first.ledgerIn;
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires second.amountOut + removed.amountA <= first.amountIn + added.usedA;
+    requires afterA + (first.amountIn + added.usedA) ==
+      beforeA + (second.amountOut + removed.amountA);
+    ensures afterA <= beforeA;
+  {
+    spendReceiveNoProfit(
+      beforeA,
+      afterA,
+      first.amountIn + added.usedA,
+      second.amountOut + removed.amountA
+    )
+  };
+
+  public func swapBackAddRemoveClosedLedgerBNoProfit(
+    beforeB : Nat,
+    afterB : Nat,
+    first : Types.SwapReceipt,
+    second : Types.SwapReceipt,
+    added : Types.AddLiquidityReceipt,
+    removed : Types.RemoveLiquidityReceipt
+  ) : ()
+    requires first.ledgerIn == added.ledgerB;
+    requires first.ledgerOut == added.ledgerA;
+    requires second.ledgerIn == first.ledgerOut;
+    requires second.ledgerOut == first.ledgerIn;
+    requires added.poolKey == removed.poolKey;
+    requires added.ledgerA == removed.ledgerA;
+    requires added.ledgerB == removed.ledgerB;
+    requires removed.shares == added.shares;
+    requires second.amountOut + removed.amountB <= first.amountIn + added.usedB;
+    requires afterB + (first.amountIn + added.usedB) ==
+      beforeB + (second.amountOut + removed.amountB);
+    ensures afterB <= beforeB;
+  {
+    spendReceiveNoProfit(
+      beforeB,
+      afterB,
+      first.amountIn + added.usedB,
+      second.amountOut + removed.amountB
+    )
+  };
+}

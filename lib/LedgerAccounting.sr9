@@ -1,0 +1,153 @@
+import BMap "mo:core/pure/BMap";
+import Text "mo:core/Text";
+
+module {
+  public type LedgerAccounting = opaque {
+    var inflows : BMap.BMap<Text, Nat>;
+    var outflows : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(inflows, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(outflows, Text.compare)
+  };
+
+  public ghost func model(_accounting : LedgerAccounting) : Nat
+    requires true;
+    ensures result == 0;
+  {
+    0
+  };
+
+  private pure func mapGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?existing) { existing };
+      case null { 0 }
+    }
+  };
+
+  public func empty() : LedgerAccounting
+    requires true;
+  {
+    let inflows = BMap.empty<Text, Nat>();
+    let outflows = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var inflows = inflows;
+      var outflows = outflows
+    }
+  };
+
+  public ghost func inflowModel(accounting : LedgerAccounting) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(accounting.inflows);
+  {
+    BMap.Spec.model<Text, Nat>(accounting.inflows)
+  };
+
+  public ghost func outflowModel(accounting : LedgerAccounting) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(accounting.outflows);
+  {
+    BMap.Spec.model<Text, Nat>(accounting.outflows)
+  };
+
+  public pure func inflow(accounting : LedgerAccounting, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == inflowValue(accounting, ledgerKey);
+  {
+    mapGet(accounting.inflows, ledgerKey)
+  };
+
+  public pure func outflow(accounting : LedgerAccounting, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == outflowValue(accounting, ledgerKey);
+  {
+    mapGet(accounting.outflows, ledgerKey)
+  };
+
+  public ghost func inflowValue(accounting : LedgerAccounting, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(inflowModel(accounting), ledgerKey, 0);
+  {
+    Map.getOr<Text, Nat>(inflowModel(accounting), ledgerKey, 0)
+  };
+
+  public ghost func outflowValue(accounting : LedgerAccounting, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(outflowModel(accounting), ledgerKey, 0);
+  {
+    Map.getOr<Text, Nat>(outflowModel(accounting), ledgerKey, 0)
+  };
+
+  public pure func net(accounting : LedgerAccounting, ledgerKey : Text) : Nat
+    requires true;
+    ensures result >= 0;
+  {
+    let inAmount = inflow(accounting, ledgerKey);
+    let outAmount = outflow(accounting, ledgerKey);
+    if (outAmount >= inAmount) { 0 } else { inAmount - outAmount }
+  };
+
+  public pure func settled(accounting : LedgerAccounting, ledgerKey : Text) : Bool
+    requires true;
+    ensures result == (inflow(accounting, ledgerKey) >= outflow(accounting, ledgerKey));
+  {
+    inflow(accounting, ledgerKey) >= outflow(accounting, ledgerKey)
+  };
+
+  public func recordDeposit(accounting : LedgerAccounting, ledgerKey : Text, amount : Nat) : ()
+    requires true;
+    ensures inflowValue(accounting, ledgerKey) == old(inflowValue(accounting, ledgerKey)) + amount;
+    ensures outflowValue(accounting, ledgerKey) == old(outflowValue(accounting, ledgerKey));
+    ensures old(settled(accounting, ledgerKey)) ==> settled(accounting, ledgerKey);
+    ensures old(settled(accounting, ledgerKey)) ==>
+      net(accounting, ledgerKey) == old(net(accounting, ledgerKey)) + amount;
+  {
+    if (amount == 0) {
+      return
+    };
+    let current = mapGet(accounting.inflows, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(accounting.inflows, Text.compare);
+    let nextInflows = BMap.add<Text, Nat>(accounting.inflows, Text.compare, ledgerKey, current + amount);
+    assert BMap.orderedBy<Text, Nat>(nextInflows, Text.compare);
+    accounting.inflows := nextInflows
+  };
+
+  public func recordWithdraw(accounting : LedgerAccounting, ledgerKey : Text, debitAmount : Nat) : ()
+    requires true;
+    ensures inflowValue(accounting, ledgerKey) == old(inflowValue(accounting, ledgerKey));
+    ensures outflowValue(accounting, ledgerKey) == old(outflowValue(accounting, ledgerKey)) + debitAmount;
+    ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + debitAmount ==>
+      settled(accounting, ledgerKey);
+    ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + debitAmount ==>
+      net(accounting, ledgerKey) + debitAmount == old(net(accounting, ledgerKey));
+  {
+    if (debitAmount == 0) {
+      return
+    };
+    let current = mapGet(accounting.outflows, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(accounting.outflows, Text.compare);
+    let nextOutflows = BMap.add<Text, Nat>(accounting.outflows, Text.compare, ledgerKey, current + debitAmount);
+    assert BMap.orderedBy<Text, Nat>(nextOutflows, Text.compare);
+    accounting.outflows := nextOutflows
+  };
+
+  public func recordForcedReturn(accounting : LedgerAccounting, ledgerKey : Text, localBalance : Nat) : ()
+    requires true;
+    ensures inflowValue(accounting, ledgerKey) == old(inflowValue(accounting, ledgerKey));
+    ensures outflowValue(accounting, ledgerKey) == old(outflowValue(accounting, ledgerKey)) + localBalance;
+    ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + localBalance ==>
+      settled(accounting, ledgerKey);
+    ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + localBalance ==>
+      net(accounting, ledgerKey) + localBalance == old(net(accounting, ledgerKey));
+  {
+    if (localBalance == 0) {
+      return
+    };
+    let current = mapGet(accounting.outflows, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(accounting.outflows, Text.compare);
+    let nextOutflows = BMap.add<Text, Nat>(accounting.outflows, Text.compare, ledgerKey, current + localBalance);
+    assert BMap.orderedBy<Text, Nat>(nextOutflows, Text.compare);
+    accounting.outflows := nextOutflows
+  };
+}

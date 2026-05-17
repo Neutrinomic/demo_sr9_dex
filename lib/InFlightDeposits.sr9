@@ -1,0 +1,81 @@
+import BMap "mo:core/pure/BMap";
+import Text "mo:core/Text";
+
+module {
+  public type InFlightDeposits = opaque {
+    var counts : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(counts, Text.compare)
+  };
+
+  public func empty() : InFlightDeposits
+    requires true;
+    ensures model(result) == Map.empty<Text, Nat>();
+  {
+    let counts = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    { var counts = counts }
+  };
+
+  public ghost func model(guards : InFlightDeposits) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(guards.counts);
+  {
+    BMap.Spec.model<Text, Nat>(guards.counts)
+  };
+
+  private pure func mapGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private func putCount(map : BMap.BMap<Text, Nat>, key : Text, value : Nat) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  public ghost func count(guards : InFlightDeposits, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(model(guards), ledgerKey, 0);
+  {
+    Map.getOr<Text, Nat>(model(guards), ledgerKey, 0)
+  };
+
+  public func begin(guards : InFlightDeposits, ledgerKey : Text) : ()
+    modifies guards
+    requires true;
+    ensures count(guards, ledgerKey) == old(count(guards, ledgerKey)) + 1;
+  {
+    let current = mapGet(guards.counts, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(guards.counts, Text.compare);
+    guards.counts := putCount(guards.counts, ledgerKey, current + 1)
+  };
+
+  public func end(guards : InFlightDeposits, ledgerKey : Text) : ()
+    modifies guards
+    requires true;
+    ensures if (old(count(guards, ledgerKey)) > 0) {
+      count(guards, ledgerKey) + 1 == old(count(guards, ledgerKey))
+    } else {
+      count(guards, ledgerKey) == 0
+    };
+  {
+    let current = mapGet(guards.counts, ledgerKey);
+    if (current > 0) {
+      assert BMap.orderedBy<Text, Nat>(guards.counts, Text.compare);
+      guards.counts := putCount(guards.counts, ledgerKey, current - 1)
+    }
+  };
+
+  public pure func hasLedger(guards : InFlightDeposits, ledgerKey : Text) : Bool
+    requires true;
+    ensures result == (count(guards, ledgerKey) > 0);
+  {
+    mapGet(guards.counts, ledgerKey) > 0
+  };
+}

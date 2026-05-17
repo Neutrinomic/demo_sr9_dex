@@ -1,0 +1,444 @@
+import AssetKey "./lib/AssetKey";
+import AmmMath "./lib/AmmMath";
+import BalanceBook "./lib/BalanceBook";
+import Dex "./lib/Dex";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
+import Types "./lib/Types";
+
+persistent actor class DexActorDemo(controller : Principal) {
+  public type Result<Ok, Err> = Types.Result<Ok, Err>;
+  public type ControllerLedgerAction = Types.ControllerLedgerAction;
+  public type DepositReceipt = Types.DepositReceipt;
+  public type DepositError = Types.DepositError;
+  public type WithdrawReceipt = Types.WithdrawReceipt;
+  public type WithdrawError = Types.WithdrawError;
+  public type QuoteReceipt = Types.QuoteReceipt;
+  public type QuoteError = Types.QuoteError;
+  public type SwapReceipt = Types.SwapReceipt;
+  public type SwapError = Types.SwapError;
+  public type LiquidityRequest = Types.LiquidityRequest;
+  public type LiquidityReceipt = Types.LiquidityReceipt;
+  public type LiquidityError = Types.LiquidityError;
+  public type PoolInfo = Types.PoolInfo;
+  public type CreatePoolError = Types.CreatePoolError;
+  public type RemovePoolReceipt = Types.RemovePoolReceipt;
+  public type RemovePoolError = Types.RemovePoolError;
+  public type ReturnLedgerBalancesReceipt = Types.ReturnLedgerBalancesReceipt;
+  public type ReturnLedgerBalancesError = Types.ReturnLedgerBalancesError;
+  public type ControllerLedgerError = Types.ControllerLedgerError;
+
+  var dex : Dex.State = Dex.empty(controller);
+
+  invariant Dex.controllerOf(dex) == controller;
+  invariant Dex.model(dex).controller == controller;
+
+  private pure func ledgerReject() : Types.LedgerReject {
+    { message = "ledger call rejected" }
+  };
+
+  // Pulls approved ICRC tokens from the caller into the DEX account and credits
+  // the caller's local balance only after the ledger returns `#Ok`.
+  public shared({ caller }) func deposit(
+    ledger : Principal,
+    amount : Nat
+  ) : async Result<DepositReceipt, DepositError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.amount == amount
+      };
+      case (#err(_)) { true }
+    };
+  {
+    ghost var controllerBefore = Dex.controllerOf(dex);
+    switch (Dex.beginDeposit(dex, ledger, amount)) {
+      case (#err err) { #err(err) };
+      case (#ok _) {
+        assert Dex.controllerOf(dex) == controllerBefore;
+        let remote = ICRCLedger.fromPrincipal(ledger);
+        let args : ICRCLedger.TransferFromArgs = {
+          to = { owner = Runtime.selfId(); subaccount = null };
+          fee = null;
+          spender_subaccount = null;
+          from = { owner = caller; subaccount = null };
+          memo = null;
+          created_at_time = null;
+          amount = amount
+        };
+        try {
+          let result = await remote.icrc2_transfer_from(args);
+          switch (result) {
+            case (#Ok txIndex) {
+              let out = Dex.finishDepositOk(dex, caller, ledger, amount, txIndex);
+              assert Dex.controllerOf(dex) == controller;
+              assert Dex.model(dex).controller == controller;
+              out
+            };
+            case (#Err err) { Dex.finishDepositErr(dex, ledger, err) }
+          }
+        } catch (_) {
+          Dex.finishDepositReject(dex, ledger, ledgerReject())
+        }
+      }
+    }
+  };
+
+  // Debits the caller's local balance by `amount + cachedFee`, transfers
+  // `amount` to the caller, and restores the exact debit if the ledger fails.
+  public shared({ caller }) func withdraw(
+    ledger : Principal,
+    amount : Nat
+  ) : async Result<WithdrawReceipt, WithdrawError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.amount == amount and
+        receipt.debitAmount == receipt.amount + receipt.fee
+      };
+      case (#err(_)) { true }
+    };
+  {
+    switch (Dex.beginWithdraw(dex, caller, ledger, amount)) {
+      case (#err err) { #err(err) };
+      case (#ok started) {
+        assert started.debitAmount == started.amount + started.fee;
+        let remote = ICRCLedger.fromPrincipal(ledger);
+        let args : ICRCLedger.TransferArg = {
+          to = { owner = caller; subaccount = null };
+          fee = ?started.fee;
+          memo = null;
+          from_subaccount = null;
+          created_at_time = null;
+          amount = amount
+        };
+        try {
+          let result = await remote.icrc1_transfer(args);
+          switch (result) {
+            case (#Ok txIndex) {
+              let out = Dex.finishWithdrawOk(dex, caller, started, txIndex);
+              assert Dex.controllerOf(dex) == controller;
+              assert Dex.model(dex).controller == controller;
+              out
+            };
+            case (#Err err) { Dex.finishWithdrawErr(dex, caller, started, err) }
+          }
+        } catch (_) {
+          Dex.finishWithdrawReject(dex, caller, started, ledgerReject())
+        }
+      }
+    }
+  };
+
+  // Returns the current exact-in AMM output for active ledgers using the same
+  // fee split and constant-product formula that `swap` applies.
+  public query func quote(
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : async Result<QuoteReceipt, QuoteError>
+    reads dex, controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures Dex.ledgerNet(dex, ledgerIn) == old(Dex.ledgerNet(dex, ledgerIn));
+    ensures Dex.ledgerNet(dex, ledgerOut) == old(Dex.ledgerNet(dex, ledgerOut));
+    ensures Dex.localObligation(dex, ledgerIn) == old(Dex.localObligation(dex, ledgerIn));
+    ensures Dex.localObligation(dex, ledgerOut) == old(Dex.localObligation(dex, ledgerOut));
+    ensures Dex.pendingOut(dex, ledgerIn) == old(Dex.pendingOut(dex, ledgerIn));
+    ensures Dex.pendingOut(dex, ledgerOut) == old(Dex.pendingOut(dex, ledgerOut));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.ok == (receipt.amountOut >= minAmountOut) and
+        receipt.reserveIn > 0 and
+        receipt.reserveOut > 0 and
+        receipt.amountOut <= receipt.reserveOut and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveIn, receipt.reserveOut, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  // Swaps deposited local balance from `ledgerIn` to `ledgerOut`, recomputes the
+  // current quote, enforces `minAmountOut`, and credits platform fees locally.
+  public shared({ caller }) func swap(
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : async Result<SwapReceipt, SwapError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok(_)) { true };
+      case (#err(_)) {
+        Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)) ==
+          old(Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)))
+      }
+    };
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.reserveInBefore > 0 and
+        receipt.reserveOutBefore > 0 and
+        receipt.amountOut > 0 and
+        receipt.amountOut >= minAmountOut and
+        receipt.amountOut < receipt.reserveOutBefore and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveInBefore, receipt.reserveOutBefore, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn and
+        receipt.reserveInAfter == receipt.reserveInBefore + receipt.effectiveAmountIn + receipt.lpFee and
+        receipt.reserveOutAfter + receipt.amountOut == receipt.reserveOutBefore
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  // Adds or removes liquidity using only deposited local balances. LP positions
+  // are virtual ledger balances under the pool asset key.
+  public shared({ caller }) func liquidity(
+    request : LiquidityRequest
+  ) : async Result<LiquidityReceipt, LiquidityError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok(#added receipt)) {
+        receipt.shares > 0 and
+        (
+          receipt.lockedShares == 0 or
+          receipt.lockedShares == AmmMath.minimumLiquidity()
+        )
+      };
+      case (#ok(#removed receipt)) { receipt.shares > 0 };
+      case (#err(_)) { true }
+    };
+    ensures switch (result) {
+      case (#ok(#added receipt)) {
+        (
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+        ) ==>
+          Dex.localBalance(dex, caller, receipt.poolKey) ==
+            old(Dex.localBalance(dex, caller, receipt.poolKey)) + receipt.shares
+      };
+      case (#ok(#removed receipt)) {
+        (
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+        ) ==>
+          Dex.localBalance(dex, caller, receipt.poolKey) + receipt.shares ==
+            old(Dex.localBalance(dex, caller, receipt.poolKey))
+      };
+      case (#err(_)) { true }
+    };
+    ensures switch (request) {
+      case (#add req) {
+        switch (result) {
+          case (#ok(#added receipt)) {
+            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
+            receipt.usedA > 0 and
+            receipt.usedB > 0 and
+            receipt.shares >= req.minShares and
+            (
+              receipt.lockedShares == 0 or
+              receipt.lockedShares == AmmMath.minimumLiquidity()
+            ) and
+            receipt.usedA + receipt.leftoverA ==
+              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountA } else { req.maxAmountB }) and
+            receipt.usedB + receipt.leftoverB ==
+              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountB } else { req.maxAmountA })
+          };
+          case _ { true }
+        }
+      };
+      case (#rem req) {
+        switch (result) {
+          case (#ok(#removed receipt)) {
+            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
+            receipt.shares == req.shares and
+            receipt.amountA >=
+              (if (receipt.ledgerA == req.ledgerA) { req.minAmountA } else { req.minAmountB }) and
+            receipt.amountB >=
+              (if (receipt.ledgerA == req.ledgerA) { req.minAmountB } else { req.minAmountA })
+          };
+          case _ { true }
+        }
+      }
+    };
+  {
+    Dex.liquidity(dex, caller, request)
+  };
+
+  // Lists every positive local balance for `user`, including real ledger keys
+  // and virtual pool-share keys.
+  public query func balances(user : Principal) : async [(Text, Nat)]
+    reads dex, controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    Dex.balances(dex, user)
+  };
+
+  // Lists all pools and their reserves, share supply, and locked-share amount.
+  public query func pools() : async [PoolInfo]
+    reads dex, controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    Dex.pools(dex)
+  };
+
+  // Controller ledger lifecycle endpoint: add reads and caches the ledger fee,
+  // retire blocks new exposure, and rem removes only a drained retiring ledger.
+  public shared({ caller }) func controller_ledger(
+    action : ControllerLedgerAction
+  ) : async Result<(), ControllerLedgerError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    switch (action) {
+      case (#add ledger) {
+        switch (Dex.controllerAddLedgerPrecheck(dex, caller, ledger)) {
+          case (#err err) { #err(err) };
+          case (#ok _) {
+            let remote = ICRCLedger.fromPrincipal(ledger);
+            try {
+              let fee = await remote.icrc1_fee();
+              Dex.controllerAddLedger(dex, caller, ledger, fee)
+            } catch (_) {
+              #err(#ledgerFeeRejected(ledgerReject()))
+            }
+          }
+        }
+      };
+      case (#retire ledger) {
+        Dex.controllerRetireLedger(dex, caller, ledger)
+      };
+      case (#rem ledger) {
+        Dex.controllerRemoveLedger(dex, caller, ledger)
+      }
+    }
+  };
+
+  // Controller-only pool creation. Both ledgers must already be active and the
+  // unordered pair must not already have a pool.
+  public shared({ caller }) func createPool(
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : async Result<PoolInfo, CreatePoolError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok info) {
+        info.ledgerA != info.ledgerB and
+        info.key == AssetKey.pool(ledgerA, ledgerB) and
+        info.reserveA == 0 and
+        info.reserveB == 0 and
+        info.totalShares == 0 and
+        info.lockedShares == 0 and
+        Dex.ledgerHasPool(dex, ledgerA) and
+        Dex.ledgerHasPool(dex, ledgerB)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.createPool(dex, caller, ledgerA, ledgerB)
+  };
+
+  // Controller-only pool retirement cleanup. Every user LP balance is converted
+  // into local token balances before the pool is deleted.
+  public shared({ caller }) func removePool(
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : async Result<RemovePoolReceipt, RemovePoolError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.key == AssetKey.pool(ledgerA, ledgerB) and
+        receipt.ledgerA != receipt.ledgerB
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.removePool(dex, caller, ledgerA, ledgerB)
+  };
+
+  // Controller-only ledger cleanup path for a retiring ledger after its pools
+  // are gone. One non-controller user's local balance is returned per call.
+  public shared({ caller }) func returnLedgerBalances(
+    ledger : Principal
+  ) : async Result<ReturnLedgerBalancesReceipt, ReturnLedgerBalancesError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok receipt) { receipt.ledger == ledger };
+      case (#err(_)) { true }
+    };
+  {
+    switch (Dex.beginReturnLedgerBalances(dex, caller, ledger)) {
+      case (#err err) { #err(err) };
+      case (#ok started) {
+        switch (started) {
+          case (#none receipt) { #ok(receipt) };
+          case (#some pending) {
+            assert pending.returnedAmount + pending.fee == pending.localBalance;
+            let remote = ICRCLedger.fromPrincipal(ledger);
+            let args : ICRCLedger.TransferArg = {
+              to = { owner = pending.user; subaccount = null };
+              fee = ?pending.fee;
+              memo = null;
+              from_subaccount = null;
+              created_at_time = null;
+              amount = pending.returnedAmount
+            };
+            try {
+              let result = await remote.icrc1_transfer(args);
+              switch (result) {
+                case (#Ok txIndex) {
+                  assert pending.returnedAmount + pending.fee == pending.localBalance;
+                  Dex.finishReturnOk(dex, pending, txIndex)
+                };
+                case (#Err err) { Dex.finishReturnErr(dex, pending, err) }
+              }
+            } catch (_) {
+              Dex.finishReturnReject(dex, pending, ledgerReject())
+            }
+          }
+        }
+      }
+    }
+  };
+}

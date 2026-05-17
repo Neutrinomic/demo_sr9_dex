@@ -1,0 +1,110 @@
+import BSeq "mo:core/pure/BSeq";
+import BMap "mo:core/pure/BMap";
+import Text "mo:core/Text";
+
+module {
+  public type Entry = (Text, Nat);
+
+  public type AssetTotals = opaque {
+    var totals : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(totals, Text.compare)
+  };
+
+  public ghost func model(totals : AssetTotals) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(totals.totals);
+  {
+    BMap.Spec.model<Text, Nat>(totals.totals)
+  };
+
+  private pure func mapGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  public func empty() : AssetTotals
+    requires true;
+    ensures model(result) == Map.empty<Text, Nat>();
+  {
+    let totals = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var totals = totals
+    }
+  };
+
+  public ghost func value(totals : AssetTotals, key : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(model(totals), key, 0);
+  {
+    Map.getOr<Text, Nat>(model(totals), key, 0)
+  };
+
+  public pure func get(totals : AssetTotals, key : Text) : Nat
+    requires true;
+    ensures result == value(totals, key);
+  {
+    mapGet(totals.totals, key)
+  };
+
+  public ghost func isZero(totals : AssetTotals, key : Text) : Bool
+    requires true;
+    ensures result == (value(totals, key) == 0);
+  {
+    value(totals, key) == 0
+  };
+
+  public func credit(totals : AssetTotals, key : Text, amount : Nat) : ()
+    requires true;
+    ensures value(totals, key) == old(value(totals, key)) + amount;
+    ensures forall<Text>(pure func (other : Text) : Bool =
+      other != key ==> value(totals, other) == old(value(totals, other)));
+  {
+    if (amount == 0) {
+      return
+    };
+    let current = mapGet(totals.totals, key);
+    assert BMap.orderedBy<Text, Nat>(totals.totals, Text.compare);
+    let nextTotals = BMap.add<Text, Nat>(totals.totals, Text.compare, key, current + amount);
+    assert BMap.orderedBy<Text, Nat>(nextTotals, Text.compare);
+    totals.totals := nextTotals
+  };
+
+  public func debit(totals : AssetTotals, key : Text, amount : Nat) : ()
+    requires true;
+    requires value(totals, key) >= amount;
+    ensures value(totals, key) == old(value(totals, key)) - amount;
+    ensures forall<Text>(pure func (other : Text) : Bool =
+      other != key ==> value(totals, other) == old(value(totals, other)));
+  {
+    let current = mapGet(totals.totals, key);
+    assert BMap.orderedBy<Text, Nat>(totals.totals, Text.compare);
+    let next = current - amount;
+    let nextTotals = BMap.add<Text, Nat>(totals.totals, Text.compare, key, next);
+    assert BMap.orderedBy<Text, Nat>(nextTotals, Text.compare);
+    totals.totals := nextTotals
+  };
+
+  public func list(totals : AssetTotals) : [Entry]
+    requires true;
+    ensures model(totals) == old(model(totals));
+  {
+    var seq = BSeq.empty<Entry>();
+    let entries = BMap.entries<Text, Nat>(totals.totals);
+    label scan loop {
+      switch (entries.next()) {
+        case null { break scan };
+        case (?(key, amount)) {
+          if (amount > 0) {
+            seq := BSeq.append<Entry>(seq, (key, amount))
+          }
+        }
+      }
+    };
+    BSeq.toArray<Entry>(seq)
+  };
+}

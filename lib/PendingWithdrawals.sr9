@@ -1,0 +1,271 @@
+import BMap "mo:core/pure/BMap";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+import Types "./Types";
+
+module {
+  public type RecordKey = Text;
+
+  public type PendingWithdrawals = opaque {
+    var amounts : BMap.BMap<Text, Nat>;
+    var fees : BMap.BMap<Text, Nat>;
+    var debits : BMap.BMap<Text, Nat>;
+    var totals : BMap.BMap<Text, Nat>;
+    invariant BMap.orderedBy<Text, Nat>(amounts, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(fees, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(debits, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(totals, Text.compare)
+  };
+
+  public ghost func model(_pending : PendingWithdrawals) : Nat
+    requires true;
+    ensures result == 0;
+  {
+    0
+  };
+
+  public ghost func debitValue(pending : PendingWithdrawals, user : Principal, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.debits),
+      recordKey(user, ledgerKey),
+      0
+    );
+  {
+    Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.debits),
+      recordKey(user, ledgerKey),
+      0
+    )
+  };
+
+  public ghost func totalValue(pending : PendingWithdrawals, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.totals),
+      ledgerKey,
+      0
+    );
+  {
+    Map.getOr<Text, Nat>(
+      BMap.Spec.model<Text, Nat>(pending.totals),
+      ledgerKey,
+      0
+    )
+  };
+
+  private pure func mapGetRecord(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private pure func mapGetLedger(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private func putRecord(
+    map : BMap.BMap<Text, Nat>,
+    key : Text,
+    value : Nat
+  ) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  private func putLedger(map : BMap.BMap<Text, Nat>, key : Text, value : Nat) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  public pure func recordKey(user : Principal, ledgerKey : Text) : Text
+    requires true;
+    ensures result == Principal.toText(user) # ":" # ledgerKey;
+  {
+    Principal.toText(user) # ":" # ledgerKey
+  };
+
+  public func empty() : PendingWithdrawals
+    requires true;
+    ensures forall<Text>(pure func (ledgerKey : Text) : Bool =
+      totalValue(result, ledgerKey) == 0);
+  {
+    let amounts = BMap.empty<Text, Nat>();
+    let fees = BMap.empty<Text, Nat>();
+    let debits = BMap.empty<Text, Nat>();
+    let totals = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var amounts = amounts;
+      var fees = fees;
+      var debits = debits;
+      var totals = totals
+    }
+  };
+
+  public pure func get(
+    pending : PendingWithdrawals,
+    user : Principal,
+    ledgerKey : Text
+  ) : ?Types.PendingWithdrawal
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?record) { record.debitAmount > 0 }
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    let debitAmount = mapGetRecord(pending.debits, key);
+    if (debitAmount == 0) {
+      null
+    } else {
+      ?{
+        amount = mapGetRecord(pending.amounts, key);
+        fee = mapGetRecord(pending.fees, key);
+        debitAmount = debitAmount
+      }
+    }
+  };
+
+  public pure func has(
+    pending : PendingWithdrawals,
+    user : Principal,
+    ledgerKey : Text
+  ) : Bool
+    requires true;
+    ensures result == (debitValue(pending, user, ledgerKey) > 0);
+  {
+    mapGetRecord(pending.debits, recordKey(user, ledgerKey)) > 0
+  };
+
+  public pure func pendingDebit(
+    pending : PendingWithdrawals,
+    user : Principal,
+    ledgerKey : Text
+  ) : Nat
+    requires true;
+    ensures result == debitValue(pending, user, ledgerKey);
+  {
+    mapGetRecord(pending.debits, recordKey(user, ledgerKey))
+  };
+
+  public pure func total(pending : PendingWithdrawals, ledgerKey : Text) : Nat
+    requires true;
+    ensures result == totalValue(pending, ledgerKey);
+  {
+    mapGetLedger(pending.totals, ledgerKey)
+  };
+
+  public pure func hasLedger(pending : PendingWithdrawals, ledgerKey : Text) : Bool
+    requires true;
+    ensures result == (total(pending, ledgerKey) > 0);
+  {
+    total(pending, ledgerKey) > 0
+  };
+
+  public func begin(
+    pending : PendingWithdrawals,
+    user : Principal,
+    ledgerKey : Text,
+    record : Types.PendingWithdrawal
+  ) : Bool
+    requires true;
+    requires record.debitAmount == record.amount + record.fee;
+    ensures if (result) {
+      debitValue(pending, user, ledgerKey) == record.debitAmount and
+      totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey)) + record.debitAmount
+    } else {
+      debitValue(pending, user, ledgerKey) == old(debitValue(pending, user, ledgerKey)) and
+      totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey))
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    if (mapGetRecord(pending.debits, key) > 0) {
+      return false
+    };
+    assert BMap.orderedBy<Text, Nat>(pending.amounts, Text.compare);
+    pending.amounts := putRecord(pending.amounts, key, record.amount);
+    assert BMap.orderedBy<Text, Nat>(pending.fees, Text.compare);
+    pending.fees := putRecord(pending.fees, key, record.fee);
+    assert BMap.orderedBy<Text, Nat>(pending.debits, Text.compare);
+    pending.debits := putRecord(pending.debits, key, record.debitAmount);
+    let currentTotal = mapGetLedger(pending.totals, ledgerKey);
+    assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
+    pending.totals := putLedger(pending.totals, ledgerKey, currentTotal + record.debitAmount);
+    true
+  };
+
+  public func take(
+    pending : PendingWithdrawals,
+    user : Principal,
+    ledgerKey : Text
+  ) : ?Types.PendingWithdrawal
+    requires true;
+    ensures switch (result) {
+      case null {
+        old(pendingDebit(pending, user, ledgerKey)) == 0 and
+        pendingDebit(pending, user, ledgerKey) == 0 and
+        old(debitValue(pending, user, ledgerKey)) == 0 and
+        debitValue(pending, user, ledgerKey) == 0 and
+        debitValue(pending, user, ledgerKey) == old(debitValue(pending, user, ledgerKey)) and
+        totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey))
+      };
+      case (?record) {
+        record.debitAmount == old(pendingDebit(pending, user, ledgerKey)) and
+        pendingDebit(pending, user, ledgerKey) == 0 and
+        record.debitAmount == old(debitValue(pending, user, ledgerKey)) and
+        debitValue(pending, user, ledgerKey) == 0 and
+        totalValue(pending, ledgerKey) <= old(totalValue(pending, ledgerKey)) and
+        (
+          old(totalValue(pending, ledgerKey)) >= record.debitAmount ==>
+          totalValue(pending, ledgerKey) + record.debitAmount ==
+            old(totalValue(pending, ledgerKey))
+        ) and
+        (
+          old(totalValue(pending, ledgerKey)) < record.debitAmount ==>
+          totalValue(pending, ledgerKey) == 0
+        )
+      }
+    };
+  {
+    let key = recordKey(user, ledgerKey);
+    let debitAmount = mapGetRecord(pending.debits, key);
+    if (debitAmount == 0) {
+      null
+    } else {
+      let record = {
+        amount = mapGetRecord(pending.amounts, key);
+        fee = mapGetRecord(pending.fees, key);
+        debitAmount = debitAmount
+      };
+      assert BMap.orderedBy<Text, Nat>(pending.amounts, Text.compare);
+      pending.amounts := putRecord(pending.amounts, key, 0);
+      assert BMap.orderedBy<Text, Nat>(pending.fees, Text.compare);
+      pending.fees := putRecord(pending.fees, key, 0);
+      assert BMap.orderedBy<Text, Nat>(pending.debits, Text.compare);
+      pending.debits := putRecord(pending.debits, key, 0);
+      let currentTotal = mapGetLedger(pending.totals, ledgerKey);
+      let nextTotal = if (currentTotal >= record.debitAmount) {
+        currentTotal - record.debitAmount
+      } else {
+        0
+      };
+      assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
+      pending.totals := putLedger(pending.totals, ledgerKey, nextTotal);
+      ?record
+    }
+  };
+}

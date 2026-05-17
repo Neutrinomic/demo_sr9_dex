@@ -1,0 +1,67 @@
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+
+module {
+  public pure func ledger(ledgerPrincipal : Principal) : Text
+    requires true;
+    ensures result == "ledger:" # Principal.toText(ledgerPrincipal);
+  {
+    "ledger:" # Principal.toText(ledgerPrincipal)
+  };
+
+  public pure func pool(ledgerA : Principal, ledgerB : Principal) : Text
+    requires true;
+    ensures result == "pool:" # Principal.toText(canonicalA(ledgerA, ledgerB)) #
+      ":" # Principal.toText(canonicalB(ledgerA, ledgerB));
+  {
+    switch (Principal.compare(ledgerA, ledgerB)) {
+      case (#less) {
+        "pool:" # Principal.toText(ledgerA) # ":" # Principal.toText(ledgerB)
+      };
+      case (#equal) {
+        "pool:" # Principal.toText(ledgerA) # ":" # Principal.toText(ledgerB)
+      };
+      case (#greater) {
+        "pool:" # Principal.toText(ledgerB) # ":" # Principal.toText(ledgerA)
+      }
+    }
+  };
+
+  public pure func canonicalA(ledgerA : Principal, ledgerB : Principal) : Principal
+    requires true;
+    ensures result == ledgerA or result == ledgerB;
+    ensures Principal.compare(ledgerA, ledgerB) == #greater ==> result == ledgerB;
+    ensures Principal.compare(ledgerA, ledgerB) != #greater ==> result == ledgerA;
+  {
+    switch (Principal.compare(ledgerA, ledgerB)) {
+      case (#greater) { ledgerB };
+      case _ { ledgerA }
+    }
+  };
+
+  public pure func canonicalB(ledgerA : Principal, ledgerB : Principal) : Principal
+    requires true;
+    ensures result == ledgerA or result == ledgerB;
+    ensures Principal.compare(ledgerA, ledgerB) == #greater ==> result == ledgerA;
+    ensures Principal.compare(ledgerA, ledgerB) != #greater ==> result == ledgerB;
+  {
+    switch (Principal.compare(ledgerA, ledgerB)) {
+      case (#greater) { ledgerA };
+      case _ { ledgerB }
+    }
+  };
+
+  public func isLedgerKey(key : Text) : Bool
+    requires true;
+    ensures result == Text.startsWith(key, #text "ledger:");
+  {
+    Text.startsWith(key, #text "ledger:")
+  };
+
+  public func isPoolKey(key : Text) : Bool
+    requires true;
+    ensures result == Text.startsWith(key, #text "pool:");
+  {
+    Text.startsWith(key, #text "pool:")
+  };
+}

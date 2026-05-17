@@ -1,0 +1,226 @@
+import BMap "mo:core/pure/BMap";
+import BSeq "mo:core/pure/BSeq";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+
+module {
+  public type BalanceEntry = (Text, Nat);
+
+  public type BalanceBook = opaque {
+    var balances : BMap.BMap<Text, Nat>;
+    var totals : BMap.BMap<Text, Nat>;
+    var seen : BMap.BMap<Text, Nat>;
+    var holderLog : BSeq.XSeq<(Text, Principal)>;
+    invariant BMap.orderedBy<Text, Nat>(balances, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(totals, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(seen, Text.compare)
+  };
+
+  public ghost func model(book : BalanceBook) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(book.balances);
+  {
+    BMap.Spec.model<Text, Nat>(book.balances)
+  };
+
+  public ghost func userModel(book : BalanceBook) : Map<Text, Nat>
+    requires true;
+    ensures result == model(book);
+  {
+    model(book)
+  };
+
+  public ghost func totalModel(book : BalanceBook) : Map<Text, Nat>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Nat>(book.totals);
+  {
+    BMap.Spec.model<Text, Nat>(book.totals)
+  };
+
+  public ghost func userCount(book : BalanceBook) : Nat
+    requires true;
+    ensures result == BMap.size<Text, Nat>(book.balances);
+  {
+    BMap.size<Text, Nat>(book.balances)
+  };
+
+  public pure func recordKey(user : Principal, key : Text) : Text
+    requires true;
+    ensures result == Principal.toText(user) # ":" # key;
+  {
+    Principal.toText(user) # ":" # key
+  };
+
+  private pure func mapGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private func put(map : BMap.BMap<Text, Nat>, key : Text, value : Nat) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  public func empty() : BalanceBook
+    requires true;
+    ensures model(result) == Map.empty<Text, Nat>();
+    ensures totalModel(result) == Map.empty<Text, Nat>();
+  {
+    let balances = BMap.empty<Text, Nat>();
+    let totals = BMap.empty<Text, Nat>();
+    let seen = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var balances = balances;
+      var totals = totals;
+      var seen = seen;
+      var holderLog = BSeq.empty<(Text, Principal)>()
+    }
+  };
+
+  public pure func get(book : BalanceBook, user : Principal, key : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0);
+  {
+    mapGet(book.balances, recordKey(user, key))
+  };
+
+  public pure func total(book : BalanceBook, key : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(totalModel(book), key, 0);
+  {
+    mapGet(book.totals, key)
+  };
+
+  public func credit(book : BalanceBook, user : Principal, key : Text, amount : Nat) : ()
+    requires true;
+    ensures total(book, key) == old(total(book, key)) + amount;
+    ensures get(book, user, key) == old(get(book, user, key)) + amount;
+    ensures forall<Text>(pure func (otherRecordKey : Text) : Bool =
+      otherRecordKey != recordKey(user, key) ==>
+        Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
+        old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
+  {
+    if (amount == 0) {
+      return
+    };
+    let balanceKey = recordKey(user, key);
+    let previous = mapGet(book.balances, balanceKey);
+    let previousTotal = mapGet(book.totals, key);
+    assert BMap.orderedBy<Text, Nat>(book.balances, Text.compare);
+    book.balances := put(book.balances, balanceKey, previous + amount);
+    assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
+    book.totals := put(book.totals, key, previousTotal + amount);
+    if (mapGet(book.seen, balanceKey) == 0) {
+      assert BMap.orderedBy<Text, Nat>(book.seen, Text.compare);
+      book.seen := put(book.seen, balanceKey, 1);
+      book.holderLog := BSeq.append<(Text, Principal)>(book.holderLog, (key, user))
+    }
+  };
+
+  public func debit(book : BalanceBook, user : Principal, key : Text, amount : Nat) : Bool
+    requires true;
+    ensures result ==> get(book, user, key) + amount == old(get(book, user, key));
+    ensures result ==> total(book, key) + amount == old(total(book, key));
+    ensures not result ==> get(book, user, key) == old(get(book, user, key));
+    ensures not result ==> total(book, key) == old(total(book, key));
+    ensures forall<Text>(pure func (otherRecordKey : Text) : Bool =
+      otherRecordKey != recordKey(user, key) ==>
+        Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
+        old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
+  {
+    if (amount == 0) {
+      return true
+    };
+    let balanceKey = recordKey(user, key);
+    let previous = mapGet(book.balances, balanceKey);
+    if (previous < amount) {
+      return false
+    };
+    let previousTotal = mapGet(book.totals, key);
+    if (previousTotal < amount) {
+      return false
+    };
+    assert BMap.orderedBy<Text, Nat>(book.balances, Text.compare);
+    book.balances := put(book.balances, balanceKey, previous - amount);
+    assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
+    book.totals := put(book.totals, key, previousTotal - amount);
+    true
+  };
+
+  public trusted func balances(book : BalanceBook, user : Principal) : [BalanceEntry]
+    requires true;
+    ensures model(book) == old(model(book));
+    ensures totalModel(book) == old(totalModel(book));
+  {
+    var seq = BSeq.empty<BalanceEntry>();
+    var i = 0;
+    label scan while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
+      loop:invariant i <= BSeq.size<(Text, Principal)>(book.holderLog);
+      loop:invariant model(book) == old(model(book));
+      loop:invariant totalModel(book) == old(totalModel(book));
+      let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
+      if (item.1 == user) {
+        let amount = get(book, user, item.0);
+        if (amount > 0) {
+          seq := BSeq.append<BalanceEntry>(seq, (item.0, amount))
+        }
+      };
+      i += 1
+    };
+    BSeq.toArray<BalanceEntry>(seq)
+  };
+
+  public trusted func holders(book : BalanceBook, key : Text) : [Principal]
+    requires true;
+    ensures model(book) == old(model(book));
+    ensures totalModel(book) == old(totalModel(book));
+  {
+    var seq = BSeq.empty<Principal>();
+    var i = 0;
+    label scan while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
+      loop:invariant i <= BSeq.size<(Text, Principal)>(book.holderLog);
+      loop:invariant model(book) == old(model(book));
+      loop:invariant totalModel(book) == old(totalModel(book));
+      let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
+      let user = item.1;
+      if (item.0 == key and get(book, user, key) > 0) {
+        seq := BSeq.append<Principal>(seq, user)
+      };
+      i += 1
+    };
+    BSeq.toArray<Principal>(seq)
+  };
+
+  public trusted func firstNonControllerHolder(
+    book : BalanceBook,
+    key : Text,
+    controller : Principal
+  ) : ?Principal
+    requires true;
+    ensures model(book) == old(model(book));
+    ensures totalModel(book) == old(totalModel(book));
+  {
+    let holderList = holders(book, key);
+    var i = 0;
+    label scan while (i < holderList.size()) {
+      loop:invariant i <= holderList.size();
+      loop:invariant model(book) == old(model(book));
+      loop:invariant totalModel(book) == old(totalModel(book));
+      let user = holderList[i];
+      if (user != controller and get(book, user, key) > 0) {
+        return ?user
+      };
+      i += 1
+    };
+    null
+  };
+}

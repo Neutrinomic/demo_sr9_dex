@@ -1,0 +1,224 @@
+import Nat "mo:core/Nat";
+import Types "./Types";
+
+module {
+  public pure func minimumLiquidity() : Nat
+    requires true;
+    ensures result == 1;
+  {
+    1
+  };
+
+  public pure func min(a : Nat, b : Nat) : Nat
+    requires true;
+    ensures result <= a;
+    ensures result <= b;
+    ensures result == a or result == b;
+  {
+    if (a <= b) { a } else { b }
+  };
+
+  public pure func splitFees(amountIn : Nat) : Types.SwapFees
+    requires true;
+    ensures result.fee <= amountIn;
+    ensures result.platformFee + result.lpFee == result.fee;
+    ensures result.effectiveAmountIn + result.platformFee + result.lpFee == amountIn;
+  {
+    let fee = (amountIn * 3) / 1000;
+    let platformFee = (fee * 20) / 100;
+    let lpFee = fee - platformFee;
+    {
+      fee = fee;
+      platformFee = platformFee;
+      lpFee = lpFee;
+      effectiveAmountIn = amountIn - fee
+    }
+  };
+
+  public pure func quoteExactIn(
+    reserveIn : Nat,
+    reserveOut : Nat,
+    effectiveAmountIn : Nat
+  ) : Nat
+    requires true;
+    ensures result <= reserveOut;
+  {
+    if (reserveIn == 0) {
+      0
+    } else if (reserveOut == 0) {
+      0
+    } else if (effectiveAmountIn == 0) {
+      0
+    } else {
+      Nat.div(reserveOut * effectiveAmountIn, reserveIn + effectiveAmountIn)
+    }
+  };
+
+  public func sqrtFloor(n : Nat) : Nat
+    requires true;
+    ensures result * result <= n;
+    ensures n < (result + 1) * (result + 1);
+  {
+    if (n == 0) {
+      return 0
+    };
+    var low = 0;
+    var high = n;
+    label search while (low < high) {
+      loop:invariant low <= high;
+      loop:invariant low * low <= n;
+      loop:invariant n < (high + 1) * (high + 1);
+      let mid = Nat.div(low + high + 1, 2);
+      if (mid * mid <= n) {
+        low := mid
+      } else {
+        high := mid - 1
+      }
+    };
+    low
+  };
+
+  public func planInitialAdd(
+    maxAmountA : Nat,
+    maxAmountB : Nat,
+    minShares : Nat
+  ) : ?{
+    usedA : Nat;
+    usedB : Nat;
+    shares : Nat;
+    lockedSharesAdded : Nat
+  }
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?p) {
+        p.usedA == maxAmountA and
+        p.usedB == maxAmountB and
+        p.shares >= minShares and
+        p.shares > 0 and
+        p.lockedSharesAdded == minimumLiquidity() and
+        (p.shares + p.lockedSharesAdded) * (p.shares + p.lockedSharesAdded) <=
+          maxAmountA * maxAmountB
+      }
+    };
+  {
+    if (maxAmountA == 0 or maxAmountB == 0) {
+      return null
+    };
+    let grossShares = sqrtFloor(maxAmountA * maxAmountB);
+    if (grossShares <= minimumLiquidity()) {
+      return null
+    };
+    let mintedShares = grossShares - minimumLiquidity();
+    if (mintedShares == 0 or mintedShares < minShares) {
+      return null
+    };
+    ?{
+      usedA = maxAmountA;
+      usedB = maxAmountB;
+      shares = mintedShares;
+      lockedSharesAdded = minimumLiquidity()
+    }
+  };
+
+  public pure func planExistingAdd(
+    reserveA : Nat,
+    reserveB : Nat,
+    totalShares : Nat,
+    maxAmountA : Nat,
+    maxAmountB : Nat,
+    minShares : Nat
+  ) : ?{
+    usedA : Nat;
+    usedB : Nat;
+    shares : Nat;
+    lockedSharesAdded : Nat
+  }
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?p) {
+        p.usedA <= maxAmountA and
+        p.usedB <= maxAmountB and
+        p.usedA > 0 and
+        p.usedB > 0 and
+        p.shares >= minShares and
+        p.shares > 0 and
+        p.lockedSharesAdded == 0 and
+        reserveA > 0 and
+        reserveB > 0 and
+        totalShares > 0 and
+        p.shares * reserveA <= p.usedA * totalShares and
+        p.shares * reserveB <= p.usedB * totalShares
+      }
+    };
+  {
+    if (
+      reserveA == 0 or reserveB == 0 or totalShares == 0 or
+      maxAmountA == 0 or maxAmountB == 0
+    ) {
+      return null
+    };
+    let candidateB = Nat.div(maxAmountA * reserveB, reserveA);
+    let usedA = if (candidateB <= maxAmountB) {
+      maxAmountA
+    } else {
+      Nat.div(maxAmountB * reserveA, reserveB)
+    };
+    let usedB = if (candidateB <= maxAmountB) {
+      candidateB
+    } else {
+      maxAmountB
+    };
+    if (usedA == 0 or usedB == 0) {
+      return null
+    };
+    let sharesFromA = Nat.div(usedA * totalShares, reserveA);
+    let sharesFromB = Nat.div(usedB * totalShares, reserveB);
+    let mintedShares = min(sharesFromA, sharesFromB);
+    if (mintedShares == 0 or mintedShares < minShares) {
+      return null
+    };
+    ?{
+      usedA = usedA;
+      usedB = usedB;
+      shares = mintedShares;
+      lockedSharesAdded = 0
+    }
+  };
+
+  public pure func planRemove(
+    reserveA : Nat,
+    reserveB : Nat,
+    totalShares : Nat,
+    shares : Nat,
+    minAmountA : Nat,
+    minAmountB : Nat
+  ) : ?{ amountA : Nat; amountB : Nat }
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?p) {
+        totalShares > 0 and
+        shares > 0 and
+        shares <= totalShares and
+        p.amountA >= minAmountA and
+        p.amountB >= minAmountB and
+        p.amountA <= reserveA and
+        p.amountB <= reserveB and
+        p.amountA * totalShares <= shares * reserveA and
+        p.amountB * totalShares <= shares * reserveB
+      }
+    };
+  {
+    if (totalShares == 0 or shares == 0 or shares > totalShares) {
+      return null
+    };
+    let amountA = Nat.div(shares * reserveA, totalShares);
+    let amountB = Nat.div(shares * reserveB, totalShares);
+    if (amountA < minAmountA or amountB < minAmountB) {
+      return null
+    };
+    ?{ amountA = amountA; amountB = amountB }
+  };
+}

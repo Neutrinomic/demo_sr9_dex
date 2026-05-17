@@ -1,0 +1,585 @@
+import AssetKey "../lib/AssetKey";
+import BalanceBook "../lib/BalanceBook";
+import Dex "../lib/Dex";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import NatAxiom "mo:core/axiom/Nat";
+import Types "../lib/Types";
+
+module {
+  public func beginDepositPreservesLocalAccounting(
+    dex : Dex.State,
+    ledger : Principal,
+    amount : Nat
+  ) : Types.Result<(), Types.DepositError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) == old(Dex.localLedgerBalanceTotal(dex, ledger));
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger));
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+    ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
+  {
+    Dex.beginDeposit(dex, ledger, amount)
+  };
+
+  public func depositMovesLedgerAccountingExactly(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat,
+    txIndex : Nat
+  ) : Types.DepositReceipt
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures result.ledger == ledger;
+    ensures result.amount == amount;
+    ensures old(Dex.ledgerSettled(dex, ledger)) ==>
+      Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger)) + amount;
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) ==
+      old(Dex.localLedgerBalanceTotal(dex, ledger)) + amount;
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger)) + amount;
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+  {
+    Dex.deposit(dex, caller, ledger, amount, txIndex)
+  };
+
+  public func depositPreservesAccountingBalanceWhenSettled(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat,
+    txIndex : Nat
+  ) : Types.DepositReceipt
+    requires Dex.accountingBalanced(dex, ledger);
+    requires Dex.ledgerSettled(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let receipt = Dex.deposit(dex, caller, ledger, amount, txIndex);
+    assert Dex.ledgerNet(dex, ledger) == beforeNet + amount;
+    assert Dex.localObligation(dex, ledger) == beforeObligation + amount;
+    assert Dex.pendingOut(dex, ledger) == beforePending;
+    NatAxiom.addAssoc(beforeObligation, beforePending, amount);
+    NatAxiom.addComm(beforePending, amount);
+    NatAxiom.addAssoc(beforeObligation, amount, beforePending);
+    assert (beforeObligation + beforePending) + amount ==
+      (beforeObligation + amount) + beforePending;
+    assert Dex.ledgerNet(dex, ledger) ==
+      Dex.localObligation(dex, ledger) + Dex.pendingOut(dex, ledger);
+    receipt
+  };
+
+  public func unchangedDeltasPreserveAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires newNet == oldNet;
+    requires newObligation == oldObligation;
+    requires newPending == oldPending;
+    ensures newNet == newObligation + newPending;
+  {
+    assert newNet == newObligation + newPending
+  };
+
+  public func depositDeltasPreserveAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat,
+    amount : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires newNet == oldNet + amount;
+    requires newObligation == oldObligation + amount;
+    requires newPending == oldPending;
+    ensures newNet == newObligation + newPending;
+  {
+    NatAxiom.addAssoc(oldObligation, oldPending, amount);
+    NatAxiom.addComm(oldPending, amount);
+    NatAxiom.addAssoc(oldObligation, amount, oldPending);
+    assert (oldObligation + oldPending) + amount ==
+      (oldObligation + amount) + oldPending;
+    assert newNet == newObligation + newPending
+  };
+
+  public func moveLocalToPendingPreservesAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat,
+    debitAmount : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires newNet == oldNet;
+    requires oldObligation == newObligation + debitAmount;
+    requires newPending == oldPending + debitAmount;
+    ensures newNet == newObligation + newPending;
+  {
+    assert newNet == (newObligation + debitAmount) + oldPending;
+    NatAxiom.addAssoc(newObligation, debitAmount, oldPending);
+    NatAxiom.addComm(debitAmount, oldPending);
+    NatAxiom.addAssoc(newObligation, oldPending, debitAmount);
+    assert (newObligation + debitAmount) + oldPending ==
+      newObligation + (oldPending + debitAmount);
+    assert newNet == newObligation + newPending
+  };
+
+  public func settlePendingDebitPreservesAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat,
+    debitAmount : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires oldNet == newNet + debitAmount;
+    requires newObligation == oldObligation;
+    requires oldPending == newPending + debitAmount;
+    ensures newNet == newObligation + newPending;
+  {
+    assert newNet + debitAmount == oldObligation + (newPending + debitAmount);
+    NatAxiom.addAssoc(oldObligation, newPending, debitAmount);
+    assert newNet + debitAmount == (oldObligation + newPending) + debitAmount;
+    NatAxiom.addCancelRightEq(newNet, oldObligation + newPending, debitAmount);
+    assert newNet == newObligation + newPending
+  };
+
+  public func refundPendingDebitPreservesAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat,
+    debitAmount : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires newNet == oldNet;
+    requires newObligation == oldObligation + debitAmount;
+    requires oldPending == newPending + debitAmount;
+    ensures newNet == newObligation + newPending;
+  {
+    assert newNet == oldObligation + (newPending + debitAmount);
+    NatAxiom.addAssoc(oldObligation, newPending, debitAmount);
+    NatAxiom.addComm(newPending, debitAmount);
+    NatAxiom.addAssoc(oldObligation, debitAmount, newPending);
+    assert oldObligation + (newPending + debitAmount) ==
+      (oldObligation + debitAmount) + newPending;
+    assert newNet == newObligation + newPending
+  };
+
+  public func moveLocalToReservePreservesObligation(
+    oldLocalTotal : Nat,
+    oldReserveTotal : Nat,
+    newLocalTotal : Nat,
+    newReserveTotal : Nat,
+    reserveDelta : Nat
+  ) : ()
+    requires oldLocalTotal == newLocalTotal + reserveDelta;
+    requires newReserveTotal == oldReserveTotal + reserveDelta;
+    ensures newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal;
+  {
+    assert newLocalTotal + newReserveTotal ==
+      newLocalTotal + (oldReserveTotal + reserveDelta);
+    NatAxiom.addAssoc(newLocalTotal, oldReserveTotal, reserveDelta);
+    NatAxiom.addComm(oldReserveTotal, reserveDelta);
+    NatAxiom.addAssoc(newLocalTotal, reserveDelta, oldReserveTotal);
+    assert newLocalTotal + (oldReserveTotal + reserveDelta) ==
+      (newLocalTotal + reserveDelta) + oldReserveTotal;
+    assert newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal
+  };
+
+  public func moveReserveToLocalPreservesObligation(
+    oldLocalTotal : Nat,
+    oldReserveTotal : Nat,
+    newLocalTotal : Nat,
+    newReserveTotal : Nat,
+    reserveDelta : Nat
+  ) : ()
+    requires newLocalTotal == oldLocalTotal + reserveDelta;
+    requires oldReserveTotal == newReserveTotal + reserveDelta;
+    ensures newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal;
+  {
+    assert newLocalTotal + newReserveTotal ==
+      (oldLocalTotal + reserveDelta) + newReserveTotal;
+    NatAxiom.addAssoc(oldLocalTotal, reserveDelta, newReserveTotal);
+    NatAxiom.addComm(reserveDelta, newReserveTotal);
+    NatAxiom.addAssoc(oldLocalTotal, newReserveTotal, reserveDelta);
+    assert (oldLocalTotal + reserveDelta) + newReserveTotal ==
+      oldLocalTotal + (newReserveTotal + reserveDelta);
+    assert newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal
+  };
+
+  public func localToReserveDeltasPreserveLocalObligation(
+    oldLocalTotal : Nat,
+    oldReserveTotal : Nat,
+    oldObligation : Nat,
+    newLocalTotal : Nat,
+    newReserveTotal : Nat,
+    newObligation : Nat,
+    reserveDelta : Nat
+  ) : ()
+    requires oldObligation == oldLocalTotal + oldReserveTotal;
+    requires newObligation == newLocalTotal + newReserveTotal;
+    requires oldLocalTotal == newLocalTotal + reserveDelta;
+    requires newReserveTotal == oldReserveTotal + reserveDelta;
+    ensures newObligation == oldObligation;
+  {
+    moveLocalToReservePreservesObligation(
+      oldLocalTotal,
+      oldReserveTotal,
+      newLocalTotal,
+      newReserveTotal,
+      reserveDelta
+    );
+    assert newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal;
+    assert newObligation == oldObligation
+  };
+
+  public func reserveToLocalDeltasPreserveLocalObligation(
+    oldLocalTotal : Nat,
+    oldReserveTotal : Nat,
+    oldObligation : Nat,
+    newLocalTotal : Nat,
+    newReserveTotal : Nat,
+    newObligation : Nat,
+    reserveDelta : Nat
+  ) : ()
+    requires oldObligation == oldLocalTotal + oldReserveTotal;
+    requires newObligation == newLocalTotal + newReserveTotal;
+    requires newLocalTotal == oldLocalTotal + reserveDelta;
+    requires oldReserveTotal == newReserveTotal + reserveDelta;
+    ensures newObligation == oldObligation;
+  {
+    moveReserveToLocalPreservesObligation(
+      oldLocalTotal,
+      oldReserveTotal,
+      newLocalTotal,
+      newReserveTotal,
+      reserveDelta
+    );
+    assert newLocalTotal + newReserveTotal == oldLocalTotal + oldReserveTotal;
+    assert newObligation == oldObligation
+  };
+
+  public func poolLocalMovePreservesAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending;
+    requires newNet == oldNet;
+    requires newObligation == oldObligation;
+    requires newPending == oldPending;
+    ensures newNet == newObligation + newPending;
+  {
+    unchangedDeltasPreserveAccountingBalance(
+      oldNet,
+      oldObligation,
+      oldPending,
+      newNet,
+      newObligation,
+      newPending
+    )
+  };
+
+  public func lpSupplyRemovePoolDeltasPreserveBalance(
+    oldTotalShares : Nat,
+    oldUserShares : Nat,
+    oldLockedShares : Nat,
+    newTotalShares : Nat,
+    newUserShares : Nat,
+    newLockedShares : Nat
+  ) : ()
+    requires oldTotalShares == oldUserShares + oldLockedShares;
+    requires newTotalShares == 0;
+    requires newUserShares == 0;
+    requires newLockedShares == 0;
+    ensures newTotalShares == newUserShares + newLockedShares;
+  {
+    assert newTotalShares == newUserShares + newLockedShares
+  };
+
+  public func failedDepositErrPreservesLocalAccounting(
+    dex : Dex.State,
+    ledger : Principal,
+    err : ICRCLedger.TransferFromError
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) == old(Dex.localLedgerBalanceTotal(dex, ledger));
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger));
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+    ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
+  {
+    Dex.finishDepositErr(dex, ledger, err)
+  };
+
+  public func failedDepositRejectPreservesLocalAccounting(
+    dex : Dex.State,
+    ledger : Principal,
+    reject : Types.LedgerReject
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) == old(Dex.localLedgerBalanceTotal(dex, ledger));
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger));
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+    ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
+  {
+    Dex.finishDepositReject(dex, ledger, reject)
+  };
+
+  public func controllerAddLedgerPreservesLocalAccounting(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal,
+    fee : Nat
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) == old(Dex.localLedgerBalanceTotal(dex, ledger));
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger));
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+    ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
+  {
+    Dex.controllerAddLedger(dex, caller, ledger, fee)
+  };
+
+  public func controllerRetireLedgerPreservesLocalAccounting(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures Dex.localLedgerBalanceTotal(dex, ledger) == old(Dex.localLedgerBalanceTotal(dex, ledger));
+    ensures Dex.localObligation(dex, ledger) == old(Dex.localObligation(dex, ledger));
+    ensures Dex.pendingOut(dex, ledger) == old(Dex.pendingOut(dex, ledger));
+    ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
+  {
+    Dex.controllerRetireLedger(dex, caller, ledger)
+  };
+
+  public func createPoolMarksLedgersAsHavingPool(
+    dex : Dex.State,
+    caller : Principal,
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : Types.Result<Types.PoolInfo, Types.CreatePoolError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) {
+        Dex.ledgerHasPool(dex, ledgerA) and
+        Dex.ledgerHasPool(dex, ledgerB)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.createPool(dex, caller, ledgerA, ledgerB)
+  };
+
+  public func controllerRemoveLedgerLeavesNoPool(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures switch (result) {
+      case (#ok(_)) { not Dex.ledgerHasPool(dex, ledger) };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.controllerRemoveLedger(dex, caller, ledger)
+  };
+
+  public func swapPreservesLedgerNet(
+    dex : Dex.State,
+    caller : Principal,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.SwapReceipt, Types.SwapError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures Dex.ledgerNet(dex, ledgerIn) == old(Dex.ledgerNet(dex, ledgerIn));
+    ensures Dex.ledgerNet(dex, ledgerOut) == old(Dex.ledgerNet(dex, ledgerOut));
+  {
+    Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  public func failedSwapPreservesInputBalance(
+    dex : Dex.State,
+    caller : Principal,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.SwapReceipt, Types.SwapError>
+    requires true;
+    ensures switch (result) {
+      case (#ok(_)) { true };
+      case (#err(_)) {
+        Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)) ==
+          old(Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)))
+      }
+    };
+  {
+    Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  public func liquidityPreservesLedgerNet(
+    dex : Dex.State,
+    caller : Principal,
+    request : Types.LiquidityRequest
+  ) : Types.Result<Types.LiquidityReceipt, Types.LiquidityError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures switch (request) {
+      case (#add req) {
+        Dex.ledgerNet(dex, req.ledgerA) == old(Dex.ledgerNet(dex, req.ledgerA)) and
+        Dex.ledgerNet(dex, req.ledgerB) == old(Dex.ledgerNet(dex, req.ledgerB))
+      };
+      case (#rem req) {
+        Dex.ledgerNet(dex, req.ledgerA) == old(Dex.ledgerNet(dex, req.ledgerA)) and
+        Dex.ledgerNet(dex, req.ledgerB) == old(Dex.ledgerNet(dex, req.ledgerB))
+      }
+    };
+  {
+    Dex.liquidity(dex, caller, request)
+  };
+
+  public func quotePreservesLocalAccounting(
+    dex : Dex.State,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.QuoteReceipt, Types.QuoteError>
+    requires true;
+    ensures Dex.controllerOf(dex) == old(Dex.controllerOf(dex));
+    ensures Dex.ledgerNet(dex, ledgerIn) == old(Dex.ledgerNet(dex, ledgerIn));
+    ensures Dex.ledgerNet(dex, ledgerOut) == old(Dex.ledgerNet(dex, ledgerOut));
+    ensures Dex.localObligation(dex, ledgerIn) == old(Dex.localObligation(dex, ledgerIn));
+    ensures Dex.localObligation(dex, ledgerOut) == old(Dex.localObligation(dex, ledgerOut));
+    ensures Dex.pendingOut(dex, ledgerIn) == old(Dex.pendingOut(dex, ledgerIn));
+    ensures Dex.pendingOut(dex, ledgerOut) == old(Dex.pendingOut(dex, ledgerOut));
+  {
+    Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  public func liquidityMovesPoolSharesWhenSlotsDistinct(
+    dex : Dex.State,
+    caller : Principal,
+    request : Types.LiquidityRequest
+  ) : Types.Result<Types.LiquidityReceipt, Types.LiquidityError>
+    requires true;
+    ensures switch (result) {
+      case (#ok(#added receipt)) {
+        (
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+        ) ==>
+          Dex.localBalance(dex, caller, receipt.poolKey) ==
+            old(Dex.localBalance(dex, caller, receipt.poolKey)) + receipt.shares
+      };
+      case (#ok(#removed receipt)) {
+        (
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
+          BalanceBook.recordKey(caller, receipt.poolKey) !=
+            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
+        ) ==>
+          Dex.localBalance(dex, caller, receipt.poolKey) + receipt.shares ==
+            old(Dex.localBalance(dex, caller, receipt.poolKey))
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.liquidity(dex, caller, request)
+  };
+
+  public func lpSupplyAddDeltasPreserveBalance(
+    oldTotalShares : Nat,
+    oldUserShares : Nat,
+    oldLockedShares : Nat,
+    newTotalShares : Nat,
+    newUserShares : Nat,
+    newLockedShares : Nat,
+    mintedUserShares : Nat,
+    mintedLockedShares : Nat
+  ) : ()
+    requires oldTotalShares == oldUserShares + oldLockedShares;
+    requires newTotalShares == oldTotalShares + mintedUserShares + mintedLockedShares;
+    requires newUserShares == oldUserShares + mintedUserShares;
+    requires newLockedShares == oldLockedShares + mintedLockedShares;
+    ensures newTotalShares == newUserShares + newLockedShares;
+  {
+    assert newTotalShares ==
+      ((oldUserShares + oldLockedShares) + mintedUserShares) + mintedLockedShares;
+    NatAxiom.addAssoc(oldUserShares, oldLockedShares, mintedUserShares);
+    NatAxiom.addComm(oldLockedShares, mintedUserShares);
+    NatAxiom.addAssoc(oldUserShares, mintedUserShares, oldLockedShares);
+    assert (oldUserShares + oldLockedShares) + mintedUserShares ==
+      (oldUserShares + mintedUserShares) + oldLockedShares;
+    NatAxiom.addAssoc(oldUserShares + mintedUserShares, oldLockedShares, mintedLockedShares);
+    assert ((oldUserShares + mintedUserShares) + oldLockedShares) + mintedLockedShares ==
+      (oldUserShares + mintedUserShares) + (oldLockedShares + mintedLockedShares);
+    assert newTotalShares == newUserShares + newLockedShares
+  };
+
+  public func lpSupplyRemoveDeltasPreserveBalance(
+    oldTotalShares : Nat,
+    oldUserShares : Nat,
+    oldLockedShares : Nat,
+    newTotalShares : Nat,
+    newUserShares : Nat,
+    newLockedShares : Nat,
+    burnedUserShares : Nat
+  ) : ()
+    requires oldTotalShares == oldUserShares + oldLockedShares;
+    requires oldTotalShares == newTotalShares + burnedUserShares;
+    requires oldUserShares == newUserShares + burnedUserShares;
+    requires newLockedShares == oldLockedShares;
+    ensures newTotalShares == newUserShares + newLockedShares;
+  {
+    assert newTotalShares + burnedUserShares ==
+      (newUserShares + burnedUserShares) + oldLockedShares;
+    NatAxiom.addAssoc(newUserShares, burnedUserShares, oldLockedShares);
+    NatAxiom.addComm(burnedUserShares, oldLockedShares);
+    NatAxiom.addAssoc(newUserShares, oldLockedShares, burnedUserShares);
+    assert (newUserShares + burnedUserShares) + oldLockedShares ==
+      (newUserShares + oldLockedShares) + burnedUserShares;
+    NatAxiom.addCancelRightEq(newTotalShares, newUserShares + oldLockedShares, burnedUserShares);
+    assert newTotalShares == newUserShares + newLockedShares
+  };
+}

@@ -1,0 +1,742 @@
+import AssetKey "./AssetKey";
+import AssetTotals "./AssetTotals";
+import AmmMath "./AmmMath";
+import BMap "mo:core/pure/BMap";
+import BSeq "mo:core/pure/BSeq";
+import Pool "./Pool";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+import Types "./Types";
+
+module {
+  public type PoolRegistry = opaque {
+    var pools : BMap.BMap<Text, Pool.Pool>;
+    reserves : AssetTotals.AssetTotals;
+    var ledgerPoolCounts : BMap.BMap<Text, Nat>;
+    var poolKeys : BSeq.XSeq<Text>;
+    var nextId : Nat;
+    invariant BMap.orderedBy<Text, Pool.Pool>(pools, Text.compare);
+    invariant BMap.orderedBy<Text, Nat>(ledgerPoolCounts, Text.compare)
+  };
+
+  public ghost func model(registry : PoolRegistry) : Map<Text, Pool.Pool>
+    requires true;
+    ensures result == BMap.Spec.model<Text, Pool.Pool>(registry.pools);
+  {
+    BMap.Spec.model<Text, Pool.Pool>(registry.pools)
+  };
+
+  public ghost func poolCount(registry : PoolRegistry) : Nat
+    requires true;
+    ensures result == BMap.size<Text, Pool.Pool>(registry.pools);
+  {
+    BMap.size<Text, Pool.Pool>(registry.pools)
+  };
+
+  private pure func countGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
+    requires true;
+    ensures result == Map.getOr<Text, Nat>(BMap.Spec.model<Text, Nat>(map), key, 0);
+  {
+    switch (BMap.get<Text, Nat>(map, Text.compare, key)) {
+      case (?amount) { amount };
+      case null { 0 }
+    }
+  };
+
+  private func putCount(map : BMap.BMap<Text, Nat>, key : Text, value : Nat) : BMap.BMap<Text, Nat>
+    requires BMap.orderedBy<Text, Nat>(map, Text.compare);
+    ensures BMap.Spec.model<Text, Nat>(result) ==
+      Map.update<Text, Nat>(BMap.Spec.model<Text, Nat>(map), key, value);
+    ensures countGet(result, key) == value;
+    ensures forall<Text>(pure func (otherKey : Text) : Bool =
+      otherKey != key ==>
+        Map.getOr<Text, Nat>(BMap.Spec.model<Text, Nat>(result), otherKey, 0) ==
+        Map.getOr<Text, Nat>(BMap.Spec.model<Text, Nat>(map), otherKey, 0));
+    ensures BMap.orderedBy<Text, Nat>(result, Text.compare);
+  {
+    BMap.add<Text, Nat>(map, Text.compare, key, value)
+  };
+
+  public func empty() : PoolRegistry
+    requires true;
+    ensures model(result) == Map.empty<Text, Pool.Pool>();
+  {
+    let pools = BMap.empty<Text, Pool.Pool>();
+    let ledgerPoolCounts = BMap.empty<Text, Nat>();
+    BMap.orderedBy_empty<Text, Pool.Pool>(Text.compare);
+    BMap.orderedBy_empty<Text, Nat>(Text.compare);
+    {
+      var pools = pools;
+      reserves = AssetTotals.empty();
+      var ledgerPoolCounts = ledgerPoolCounts;
+      var poolKeys = BSeq.empty<Text>();
+      var nextId = 0
+    }
+  };
+
+  private func keyInLog(registry : PoolRegistry, key : Text) : Bool
+    requires true;
+  {
+    var i = 0;
+    label scan while (i < BSeq.size<Text>(registry.poolKeys)) {
+      loop:invariant i <= BSeq.size<Text>(registry.poolKeys);
+      if (BSeq.getNat<Text>(registry.poolKeys, i) == key) {
+        return true
+      };
+      i += 1
+    };
+    false
+  };
+
+  public pure func reserveTotal(registry : PoolRegistry, ledger : Principal) : Nat
+    requires true;
+    ensures result == AssetTotals.value(registry.reserves, AssetKey.ledger(ledger));
+  {
+    AssetTotals.get(registry.reserves, AssetKey.ledger(ledger))
+  };
+
+  public func getInfo(registry : PoolRegistry, ledgerA : Principal, ledgerB : Principal) : ?Types.PoolInfo
+    requires true;
+    ensures model(registry) == old(model(registry));
+    ensures switch (result) {
+      case null { true };
+      case (?info) {
+        info.key == AssetKey.pool(ledgerA, ledgerB) and
+        info.ledgerA != info.ledgerB and
+        info.lockedShares <= info.totalShares and
+        (info.totalShares == 0 ==> info.lockedShares == 0) and
+        (info.totalShares == 0 ==> info.reserveA == 0) and
+        (info.totalShares == 0 ==> info.reserveB == 0) and
+        (info.totalShares > 0 ==> info.reserveA > 0) and
+        (info.totalShares > 0 ==> info.reserveB > 0)
+      }
+    };
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { null };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          null
+        } else {
+          ?info
+        }
+      }
+    }
+  };
+
+  public func getInfoByKey(registry : PoolRegistry, key : Text) : ?Types.PoolInfo
+    requires true;
+    ensures model(registry) == old(model(registry));
+    ensures switch (result) {
+      case null { true };
+      case (?info) {
+        info.key == key and
+        info.ledgerA != info.ledgerB and
+        info.lockedShares <= info.totalShares and
+        (info.totalShares == 0 ==> info.lockedShares == 0) and
+        (info.totalShares == 0 ==> info.reserveA == 0) and
+        (info.totalShares == 0 ==> info.reserveB == 0) and
+        (info.totalShares > 0 ==> info.reserveA > 0) and
+        (info.totalShares > 0 ==> info.reserveB > 0)
+      }
+    };
+  {
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { null };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          null
+        } else {
+          ?info
+        }
+      }
+    }
+  };
+
+  public func createPool(
+    registry : PoolRegistry,
+    ledgerA : Principal,
+    ledgerB : Principal
+  ) : Types.Result<Types.PoolInfo, Types.CreatePoolError>
+    requires ledgerA != ledgerB;
+    ensures switch (result) {
+      case (#ok info) {
+        info.ledgerA != info.ledgerB and
+        info.key == AssetKey.pool(ledgerA, ledgerB) and
+        info.reserveA == 0 and
+        info.reserveB == 0 and
+        info.totalShares == 0 and
+        info.lockedShares == 0 and
+        containsLedger(registry, ledgerA) and
+        containsLedger(registry, ledgerB) and
+        Map.contains<Text, Pool.Pool>(info.key, model(registry))
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    let aKey = AssetKey.ledger(ledgerA);
+    let bKey = AssetKey.ledger(ledgerB);
+    if (aKey == bKey) {
+      return #err(#sameLedger)
+    };
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case (?_) { #err(#poolAlreadyExists) };
+      case null {
+        switch (Principal.compare(ledgerA, ledgerB)) {
+          case (#less) {
+            let logged = keyInLog(registry, key);
+            let pool = Pool.new(registry.nextId, key, ledgerA, ledgerB);
+            assert BMap.orderedBy<Text, Pool.Pool>(registry.pools, Text.compare);
+            registry.pools := BMap.add<Text, Pool.Pool>(registry.pools, Text.compare, key, pool);
+            let aCount = countGet(registry.ledgerPoolCounts, aKey);
+            let bCount = countGet(registry.ledgerPoolCounts, bKey);
+            assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+            registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, aKey, aCount + 1);
+            assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+            registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, bKey, bCount + 1);
+            assert ledgerPoolCount(registry, ledgerA) == aCount + 1;
+            assert ledgerPoolCount(registry, ledgerB) == bCount + 1;
+            assert Map.contains<Text, Pool.Pool>(key, model(registry));
+            if (not logged) {
+              assert Map.contains<Text, Pool.Pool>(key, model(registry));
+              registry.poolKeys := BSeq.append<Text>(registry.poolKeys, key)
+            };
+            registry.nextId += 1;
+            assert Map.contains<Text, Pool.Pool>(key, model(registry));
+            let info = Pool.info(pool);
+            assert info.ledgerA != info.ledgerB;
+            assert info.key == key;
+            assert Map.contains<Text, Pool.Pool>(info.key, model(registry));
+            #ok(info)
+          };
+          case (#greater) {
+            let logged = keyInLog(registry, key);
+            let pool = Pool.new(registry.nextId, key, ledgerB, ledgerA);
+            assert BMap.orderedBy<Text, Pool.Pool>(registry.pools, Text.compare);
+            registry.pools := BMap.add<Text, Pool.Pool>(registry.pools, Text.compare, key, pool);
+            let aCount = countGet(registry.ledgerPoolCounts, aKey);
+            let bCount = countGet(registry.ledgerPoolCounts, bKey);
+            assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+            registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, aKey, aCount + 1);
+            assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+            registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, bKey, bCount + 1);
+            assert ledgerPoolCount(registry, ledgerA) == aCount + 1;
+            assert ledgerPoolCount(registry, ledgerB) == bCount + 1;
+            assert Map.contains<Text, Pool.Pool>(key, model(registry));
+            if (not logged) {
+              assert Map.contains<Text, Pool.Pool>(key, model(registry));
+              registry.poolKeys := BSeq.append<Text>(registry.poolKeys, key)
+            };
+            registry.nextId += 1;
+            assert Map.contains<Text, Pool.Pool>(key, model(registry));
+            let info = Pool.info(pool);
+            assert info.ledgerA != info.ledgerB;
+            assert info.key == key;
+            assert Map.contains<Text, Pool.Pool>(info.key, model(registry));
+            #ok(info)
+          };
+          case (#equal) {
+            #err(#sameLedger)
+          }
+        };
+      }
+    }
+  };
+
+  public func quote(
+    registry : PoolRegistry,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.QuoteReceipt, Types.QuoteError>
+    requires amountIn > 0;
+    ensures model(registry) == old(model(registry));
+    ensures reserveTotal(registry, ledgerIn) == old(reserveTotal(registry, ledgerIn));
+    ensures reserveTotal(registry, ledgerOut) == old(reserveTotal(registry, ledgerOut));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledgerIn == ledgerIn and
+        receipt.ledgerOut == ledgerOut and
+        receipt.amountIn == amountIn and
+        receipt.minAmountOut == minAmountOut and
+        receipt.ok == (receipt.amountOut >= minAmountOut) and
+        receipt.reserveIn > 0 and
+        receipt.reserveOut > 0 and
+        receipt.amountOut <= receipt.reserveOut and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveIn, receipt.reserveOut, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.pool(ledgerIn, ledgerOut);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { #err(#poolNotFound) };
+      case (?pool) { Pool.quoteExactIn(pool, ledgerIn, ledgerOut, amountIn, minAmountOut) }
+    }
+  };
+
+  public func planSwap(
+    registry : PoolRegistry,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.SwapPlan, Types.SwapError>
+    requires amountIn > 0;
+    ensures model(registry) == old(model(registry));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.poolKey == AssetKey.pool(ledgerIn, ledgerOut) and
+        plan.ledgerIn == ledgerIn and
+        plan.ledgerOut == ledgerOut and
+        plan.ledgerIn != plan.ledgerOut and
+        plan.amountIn == amountIn and
+        plan.minAmountOut == minAmountOut and
+        plan.reserveInBefore > 0 and
+        plan.reserveOutBefore > 0 and
+        plan.amountOut > 0 and
+        plan.amountOut >= minAmountOut and
+        plan.amountOut < plan.reserveOutBefore and
+        plan.amountOut ==
+          AmmMath.quoteExactIn(plan.reserveInBefore, plan.reserveOutBefore, plan.effectiveAmountIn) and
+        plan.platformFee + plan.lpFee == plan.fee and
+        plan.effectiveAmountIn + plan.platformFee + plan.lpFee == plan.amountIn
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.pool(ledgerIn, ledgerOut);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { #err(#poolNotFound) };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          return #err(#poolNotFound)
+        };
+        Pool.planSwap(pool, ledgerIn, ledgerOut, amountIn, minAmountOut)
+      }
+    }
+  };
+
+  public func applySwap(registry : PoolRegistry, plan : Types.SwapPlan) : ?Types.SwapReceipt
+    requires plan.ledgerIn != plan.ledgerOut;
+    requires plan.amountOut > 0;
+    requires plan.amountOut < plan.reserveOutBefore;
+    requires plan.amountOut ==
+      AmmMath.quoteExactIn(plan.reserveInBefore, plan.reserveOutBefore, plan.effectiveAmountIn);
+    requires plan.platformFee + plan.lpFee == plan.fee;
+    requires plan.effectiveAmountIn + plan.platformFee + plan.lpFee == plan.amountIn;
+    ensures switch (result) {
+      case null {
+        reserveTotal(registry, plan.ledgerIn) == old(reserveTotal(registry, plan.ledgerIn)) and
+        reserveTotal(registry, plan.ledgerOut) == old(reserveTotal(registry, plan.ledgerOut))
+      };
+      case (?receipt) {
+        receipt.ledgerIn == plan.ledgerIn and
+        receipt.ledgerOut == plan.ledgerOut and
+        receipt.amountIn == plan.amountIn and
+        receipt.fee == plan.fee and
+        receipt.lpFee == plan.lpFee and
+        receipt.effectiveAmountIn == plan.effectiveAmountIn and
+        receipt.amountOut == plan.amountOut and
+        receipt.minAmountOut == plan.minAmountOut and
+        receipt.platformFee == plan.platformFee and
+        receipt.reserveInBefore == plan.reserveInBefore and
+        receipt.reserveOutBefore == plan.reserveOutBefore and
+        receipt.amountOut > 0 and
+        receipt.amountOut < receipt.reserveOutBefore and
+        receipt.amountOut ==
+          AmmMath.quoteExactIn(receipt.reserveInBefore, receipt.reserveOutBefore, receipt.effectiveAmountIn) and
+        receipt.platformFee + receipt.lpFee == receipt.fee and
+        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn and
+        receipt.reserveInAfter == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee and
+        receipt.reserveOutAfter + plan.amountOut == plan.reserveOutBefore and
+        reserveTotal(registry, plan.ledgerIn) ==
+          old(reserveTotal(registry, plan.ledgerIn)) + plan.effectiveAmountIn + plan.lpFee and
+        reserveTotal(registry, plan.ledgerOut) + plan.amountOut ==
+          old(reserveTotal(registry, plan.ledgerOut))
+      }
+    };
+  {
+    let inKey = AssetKey.ledger(plan.ledgerIn);
+    let outKey = AssetKey.ledger(plan.ledgerOut);
+    if (inKey == outKey) {
+      return null
+    };
+    if (AssetTotals.get(registry.reserves, outKey) < plan.amountOut) {
+      return null
+    };
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
+      case null { null };
+      case (?pool) {
+        switch (Pool.applySwap(pool, plan)) {
+          case null { null };
+          case (?receipt) {
+            AssetTotals.credit(
+              registry.reserves,
+              inKey,
+              plan.effectiveAmountIn + plan.lpFee
+            );
+            AssetTotals.debit(registry.reserves, outKey, plan.amountOut);
+            ?receipt
+          }
+        }
+      }
+    }
+  };
+
+  public func planAdd(
+    registry : PoolRegistry,
+    ledgerA : Principal,
+    ledgerB : Principal,
+    maxAmountA : Nat,
+    maxAmountB : Nat,
+    minShares : Nat
+  ) : Types.Result<Types.AddLiquidityPlan, Types.LiquidityError>
+    requires ledgerA != ledgerB;
+    ensures model(registry) == old(model(registry));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.ledgerA != plan.ledgerB and
+        plan.poolKey == AssetKey.pool(ledgerA, ledgerB) and
+        plan.usedA > 0 and
+        plan.usedB > 0 and
+        plan.shares > 0 and
+        plan.shares >= minShares and
+        (
+          plan.lockedSharesAdded == 0 or
+          plan.lockedSharesAdded == AmmMath.minimumLiquidity()
+        ) and
+        plan.usedA + plan.leftoverA ==
+          (if (plan.ledgerA == ledgerA) { maxAmountA } else { maxAmountB }) and
+        plan.usedB + plan.leftoverB ==
+          (if (plan.ledgerA == ledgerA) { maxAmountB } else { maxAmountA })
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { #err(#poolNotFound) };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          return #err(#poolNotFound)
+        };
+        let canonicalMaxA = if (ledgerA == info.ledgerA) { maxAmountA } else { maxAmountB };
+        let canonicalMaxB = if (ledgerA == info.ledgerA) { maxAmountB } else { maxAmountA };
+        Pool.planAdd(pool, canonicalMaxA, canonicalMaxB, minShares)
+      }
+    }
+  };
+
+  public func applyAdd(registry : PoolRegistry, plan : Types.AddLiquidityPlan) : ?Types.AddLiquidityReceipt
+    requires plan.ledgerA != plan.ledgerB;
+    ensures switch (result) {
+      case null {
+        reserveTotal(registry, plan.ledgerA) == old(reserveTotal(registry, plan.ledgerA)) and
+        reserveTotal(registry, plan.ledgerB) == old(reserveTotal(registry, plan.ledgerB))
+      };
+      case (?receipt) {
+        receipt.ledgerA == plan.ledgerA and
+        receipt.ledgerB == plan.ledgerB and
+        receipt.usedA == plan.usedA and
+        receipt.usedB == plan.usedB and
+        receipt.leftoverA == plan.leftoverA and
+        receipt.leftoverB == plan.leftoverB and
+        receipt.shares == plan.shares and
+        receipt.lockedShares == plan.lockedSharesAdded and
+        (receipt.lockedShares == 0 or receipt.lockedShares == AmmMath.minimumLiquidity()) and
+        receipt.poolKey == plan.poolKey and
+        reserveTotal(registry, plan.ledgerA) == old(reserveTotal(registry, plan.ledgerA)) + plan.usedA and
+        reserveTotal(registry, plan.ledgerB) == old(reserveTotal(registry, plan.ledgerB)) + plan.usedB
+      }
+    };
+  {
+    let aKey = AssetKey.ledger(plan.ledgerA);
+    let bKey = AssetKey.ledger(plan.ledgerB);
+    if (aKey == bKey) {
+      return null
+    };
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
+      case null { null };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != plan.poolKey) {
+          return null
+        };
+        if (info.ledgerA != plan.ledgerA or info.ledgerB != plan.ledgerB) {
+          return null
+        };
+        if (
+          plan.usedA == 0 or
+          plan.usedB == 0 or
+          plan.shares + plan.lockedSharesAdded == 0 or
+          not (
+            plan.lockedSharesAdded == 0 or
+            plan.lockedSharesAdded == AmmMath.minimumLiquidity()
+          )
+        ) {
+          return null
+        };
+        assert plan.poolKey == Pool.model(pool).key;
+        let receipt = Pool.applyAdd(pool, plan);
+        AssetTotals.credit(registry.reserves, aKey, plan.usedA);
+        AssetTotals.credit(registry.reserves, bKey, plan.usedB);
+        assert receipt.ledgerA == plan.ledgerA;
+        assert receipt.ledgerB == plan.ledgerB;
+        assert receipt.usedA == plan.usedA;
+        assert receipt.usedB == plan.usedB;
+        assert receipt.leftoverA == plan.leftoverA;
+        assert receipt.leftoverB == plan.leftoverB;
+        assert receipt.shares == plan.shares;
+        assert receipt.lockedShares == plan.lockedSharesAdded;
+        ?receipt
+      }
+    }
+  };
+
+  public func planRemove(
+    registry : PoolRegistry,
+    ledgerA : Principal,
+    ledgerB : Principal,
+    shares : Nat,
+    minAmountA : Nat,
+    minAmountB : Nat
+  ) : Types.Result<Types.RemoveLiquidityPlan, Types.LiquidityError>
+    requires ledgerA != ledgerB;
+    ensures model(registry) == old(model(registry));
+    ensures switch (result) {
+      case (#ok plan) {
+        plan.ledgerA != plan.ledgerB and
+        plan.poolKey == AssetKey.pool(ledgerA, ledgerB) and
+        plan.shares == shares and
+        plan.shares > 0 and
+        plan.amountA >=
+          (if (plan.ledgerA == ledgerA) { minAmountA } else { minAmountB }) and
+        plan.amountB >=
+          (if (plan.ledgerA == ledgerA) { minAmountB } else { minAmountA })
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { #err(#poolNotFound) };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          return #err(#poolNotFound)
+        };
+        let canonicalMinA = if (ledgerA == info.ledgerA) { minAmountA } else { minAmountB };
+        let canonicalMinB = if (ledgerA == info.ledgerA) { minAmountB } else { minAmountA };
+        switch (Pool.planRemove(pool, shares, canonicalMinA, canonicalMinB)) {
+          case (#err err) { #err(err) };
+          case (#ok plan) {
+            assert plan.ledgerA == info.ledgerA;
+            assert plan.amountA >= canonicalMinA;
+            assert plan.amountB >= canonicalMinB;
+            if (plan.ledgerA == ledgerA) {
+              assert canonicalMinA == minAmountA;
+              assert canonicalMinB == minAmountB;
+              assert plan.amountA >= minAmountA;
+              assert plan.amountB >= minAmountB
+            } else {
+              assert canonicalMinA == minAmountB;
+              assert canonicalMinB == minAmountA;
+              assert plan.amountA >= minAmountB;
+              assert plan.amountB >= minAmountA
+            };
+            #ok(plan)
+          }
+        }
+      }
+    }
+  };
+
+  public func applyRemove(registry : PoolRegistry, plan : Types.RemoveLiquidityPlan) : ?Types.RemoveLiquidityReceipt
+    requires plan.ledgerA != plan.ledgerB;
+    ensures switch (result) {
+      case null {
+        reserveTotal(registry, plan.ledgerA) == old(reserveTotal(registry, plan.ledgerA)) and
+        reserveTotal(registry, plan.ledgerB) == old(reserveTotal(registry, plan.ledgerB))
+      };
+      case (?receipt) {
+        receipt.ledgerA == plan.ledgerA and
+        receipt.ledgerB == plan.ledgerB and
+        receipt.shares == plan.shares and
+        receipt.amountA == plan.amountA and
+        receipt.amountB == plan.amountB and
+        receipt.poolKey == plan.poolKey and
+        reserveTotal(registry, plan.ledgerA) + plan.amountA == old(reserveTotal(registry, plan.ledgerA)) and
+        reserveTotal(registry, plan.ledgerB) + plan.amountB == old(reserveTotal(registry, plan.ledgerB))
+      }
+    };
+  {
+    let aKey = AssetKey.ledger(plan.ledgerA);
+    let bKey = AssetKey.ledger(plan.ledgerB);
+    if (aKey == bKey) {
+      return null
+    };
+    if (
+      AssetTotals.get(registry.reserves, aKey) < plan.amountA or
+      AssetTotals.get(registry.reserves, bKey) < plan.amountB
+    ) {
+      return null
+    };
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
+      case null { null };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != plan.poolKey) {
+          return null
+        };
+        if (info.ledgerA != plan.ledgerA or info.ledgerB != plan.ledgerB) {
+          return null
+        };
+        assert plan.poolKey == Pool.model(pool).key;
+        switch (Pool.applyRemove(pool, plan)) {
+          case null { null };
+          case (?receipt) {
+            AssetTotals.debit(registry.reserves, aKey, plan.amountA);
+            AssetTotals.debit(registry.reserves, bKey, plan.amountB);
+            ?receipt
+          }
+        }
+      }
+    }
+  };
+
+  public func deletePool(registry : PoolRegistry, ledgerA : Principal, ledgerB : Principal) : ?Types.PoolInfo
+    requires ledgerA != ledgerB;
+    ensures switch (result) {
+      case null {
+        poolCount(registry) == old(poolCount(registry))
+      };
+      case (?info) {
+        info.key == AssetKey.pool(ledgerA, ledgerB) and
+        info.ledgerA != info.ledgerB and
+        info.lockedShares <= info.totalShares and
+        (info.totalShares == 0 ==> info.lockedShares == 0) and
+        (info.totalShares == 0 ==> info.reserveA == 0) and
+        (info.totalShares == 0 ==> info.reserveB == 0) and
+        (info.totalShares > 0 ==> info.reserveA > 0) and
+        (info.totalShares > 0 ==> info.reserveB > 0) and
+        ledgerPoolCount(registry, info.ledgerA) + 1 == old(ledgerPoolCount(registry, info.ledgerA)) and
+        ledgerPoolCount(registry, info.ledgerB) + 1 == old(ledgerPoolCount(registry, info.ledgerB)) and
+        poolCount(registry) + 1 == old(poolCount(registry))
+      }
+    };
+  {
+    let key = AssetKey.pool(ledgerA, ledgerB);
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+      case null { null };
+      case (?pool) {
+        let info = Pool.info(pool);
+        if (info.key != key) {
+          return null
+        };
+        let aKey = AssetKey.ledger(info.ledgerA);
+        let bKey = AssetKey.ledger(info.ledgerB);
+        if (aKey == bKey) {
+          return null
+        };
+        if (
+          AssetTotals.get(registry.reserves, aKey) < info.reserveA or
+          AssetTotals.get(registry.reserves, bKey) < info.reserveB
+        ) {
+          return null
+        };
+        if (
+          countGet(registry.ledgerPoolCounts, aKey) == 0 or
+          countGet(registry.ledgerPoolCounts, bKey) == 0
+        ) {
+          return null
+        };
+        let aCount = countGet(registry.ledgerPoolCounts, aKey);
+        let bCount = countGet(registry.ledgerPoolCounts, bKey);
+        AssetTotals.debit(registry.reserves, aKey, info.reserveA);
+        AssetTotals.debit(registry.reserves, bKey, info.reserveB);
+        assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+        registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, aKey, aCount - 1);
+        assert BMap.orderedBy<Text, Nat>(registry.ledgerPoolCounts, Text.compare);
+        registry.ledgerPoolCounts := putCount(registry.ledgerPoolCounts, bKey, bCount - 1);
+        assert ledgerPoolCount(registry, info.ledgerA) + 1 == aCount;
+        assert ledgerPoolCount(registry, info.ledgerB) + 1 == bCount;
+        assert BMap.orderedBy<Text, Pool.Pool>(registry.pools, Text.compare);
+        let nextPools = BMap.remove<Text, Pool.Pool>(registry.pools, Text.compare, key);
+        assert BMap.orderedBy<Text, Pool.Pool>(nextPools, Text.compare);
+        registry.pools := nextPools;
+        assert Map.contains<Text, Pool.Pool>(key, model(registry)) == false;
+        assert Map.contains<Text, Pool.Pool>(info.key, model(registry)) == false;
+        ?info
+      }
+    }
+  };
+
+  public pure func ledgerPoolCount(registry : PoolRegistry, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result == countGet(registry.ledgerPoolCounts, AssetKey.ledger(ledger));
+  {
+    countGet(registry.ledgerPoolCounts, AssetKey.ledger(ledger))
+  };
+
+  public pure func containsLedger(registry : PoolRegistry, ledger : Principal) : Bool
+    requires true;
+    ensures result == (ledgerPoolCount(registry, ledger) > 0);
+  {
+    ledgerPoolCount(registry, ledger) > 0
+  };
+
+  public pure func totalShareSupply(registry : PoolRegistry, poolKey : Text) : Nat
+    requires true;
+    ensures result >= 0;
+  {
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, poolKey)) {
+      case null { 0 };
+      case (?pool) { Pool.model(pool).totalShares }
+    }
+  };
+
+  public pure func lockedShareSupply(registry : PoolRegistry, poolKey : Text) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result <= totalShareSupply(registry, poolKey);
+  {
+    switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, poolKey)) {
+      case null { 0 };
+      case (?pool) { Pool.model(pool).lockedShares }
+    }
+  };
+
+  public trusted func list(registry : PoolRegistry) : [Types.PoolInfo]
+    requires true;
+    ensures model(registry) == old(model(registry));
+  {
+    var seq = BSeq.empty<Types.PoolInfo>();
+    var i = 0;
+    label scan while (i < BSeq.size<Text>(registry.poolKeys)) {
+      loop:invariant i <= BSeq.size<Text>(registry.poolKeys);
+      loop:invariant model(registry) == old(model(registry));
+      let key = BSeq.getNat<Text>(registry.poolKeys, i);
+      switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
+        case null {};
+        case (?pool) {
+          seq := BSeq.append<Types.PoolInfo>(seq, Pool.model(pool))
+        }
+      };
+      i += 1
+    };
+    let out = BSeq.toArray<Types.PoolInfo>(seq);
+    out
+  };
+}
