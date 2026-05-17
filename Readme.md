@@ -22,6 +22,39 @@ to Viper and verifies. The code is structured so client-facing behavior,
 accounting transitions, AMM math, pending async operations, and observer proofs
 are checked as part of the normal development workflow.
 
+## Feature Highlights
+
+- Controlled or DAO-operated administration: the actor takes a controller
+  principal at initialization. That principal can be a human-controlled
+  principal, an operations canister, or a DAO/governance canister.
+- Ledger allowlist lifecycle: the controller can add ledgers, retire ledgers,
+  and finally remove drained retiring ledgers.
+- Pool lifecycle: the controller can create pools between two active,
+  whitelisted ledgers and can remove pools during cleanup.
+- Safe ledger retirement flow: a ledger cannot be removed while pools still use
+  it, while users still have local balances, or while deposits, withdrawals, or
+  forced returns are pending.
+- User fund return during cleanup: when a ledger is retiring, the controller can
+  run forced returns that move a user's full local balance into pending state,
+  send the withdrawable amount back through the external ledger, and restore the
+  exact local balance if the ledger call fails or rejects.
+- LP settlement on pool removal: user-held virtual LP-share balances are burned
+  into local token balances before the pool is deleted, so pool cleanup is
+  modeled as a conversion of user claims rather than a silent deletion.
+- Virtual ledgers for LP positions: pool shares live in the same local balance
+  book as real ledger balances, which makes user portfolio views and proof
+  accounting use one model.
+- Constant-product AMM math: quotes and swaps use the same exact-in formula,
+  and swaps execute against the current reserve snapshot rather than trusting a
+  stale quote.
+- Slippage guardrails: swaps and liquidity operations carry minimum-output or
+  minimum-share constraints.
+- Fee split: swaps charge 0.3%. Of that fee, 20% is credited to the controller's
+  local input-ledger balance as the platform fee, and 80% stays in the pool as
+  LP value.
+- Cached ledger fees: a ledger's transfer fee is read when the ledger is added
+  and refreshed if a standard ledger reports `#BadFee { expected_fee }`.
+
 ## What Is Verified
 
 The current verified surface includes these guarantees:
@@ -37,7 +70,8 @@ The current verified surface includes these guarantees:
 - Quote and swap receipts expose the same constant-product output formula.
 - Successful swaps cannot drain the output reserve.
 - The 0.3% swap fee is split into platform and LP portions, with exact receipt
-  equations for the split.
+  equations for the split: 20% of the fee goes to the controller as platform
+  fee, and 80% remains in the pool for LPs.
 - Platform fees are credited to the controller's local account.
 - Liquidity add/remove operations use local balances and virtual LP-share
   balances.
@@ -46,9 +80,12 @@ The current verified surface includes these guarantees:
   reserves, zero-share pools have zero reserves, and locked shares are bounded
   by total shares.
 - Pool creation is controller-only and requires two different active ledgers.
-- Ledger lifecycle operations are controller-only.
+- Ledger lifecycle operations are controller-only: add, retire, and final
+  removal of ledgers are gated by the configured controller/DAO principal.
 - Retiring ledgers reject final removal while pools, local balances, pending
   withdrawals, pending returns, or in-flight deposits still exist.
+- Pool removal converts user LP positions back into local token balances before
+  deleting the pool.
 - Balance totals are cached and checked through module contracts.
 - Pending deposit, withdrawal, and return modules enforce one active operation
   per relevant key.
@@ -68,7 +105,8 @@ The demo intentionally keeps several controls visible:
   interface.
 - Admin actions are controller-gated.
 - Ledgers must be whitelisted before pools or swaps use them.
-- Retiring ledgers can be drained but cannot accept new pool exposure.
+- Retiring ledgers can be drained but cannot accept new pool exposure, and final
+  removal is blocked until all pools, balances, and pending operations are gone.
 - Async ledger calls are split into local begin/finish transitions so errors
   and rejects have explicit recovery paths.
 - Public query surfaces are separated from accounting facts; core accounting
