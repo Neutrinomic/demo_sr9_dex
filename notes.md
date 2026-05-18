@@ -1383,3 +1383,36 @@
   `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
   210.685s, `DexActorDemo.sr9` 210.238s,
   `LedgerRoundTripObservers.sr9` 202.062s, and `Dex.sr9` 180.460s.
+
+- SR9 ergonomics/performance issue found while trying to strengthen
+  `BalanceBook`: adding a global opaque invariant of the form
+  `forall user,key. balance(user,key) <= total(key)` typechecked, but made
+  `BalanceBook.sr9` spin in Silicon for several minutes and spawn a large
+  number of Z3 workers. This was backed out. The proof we want is a common
+  aggregate relation between a flat per-record map and a cached per-asset
+  total, but expressing it as an unconstrained nested `forall` is too expensive
+  and gives poor feedback. A useful verifier improvement would be an indexed
+  aggregate-invariant pattern, better quantifier trigger control, or a timeout
+  diagnostic that names the invariant/function pair causing the solver blowup.
+  Repro: add the invariant to `BalanceBook.BalanceBook` and run
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 4 --verify playground/invar/dex2/lib/BalanceBook.sr9`.
+
+- SR9 ergonomics issue retried on `PoolRegistry.deletePool`: exact reserve-total
+  deltas still do not lift cleanly. Adding postconditions
+  `reserveTotal(registry, info.ledgerA) + info.reserveA == old(reserveTotal(...))`
+  and the same for ledger B failed at the local assertion immediately after
+  `AssetTotals.debit`. Even introducing explicit `reserveABefore` and
+  `reserveBBefore` snapshots failed to prove those snapshots equal the `old`
+  observer values. The diagnostic correctly hints that this is an imported
+  field-level downstream fact, but the proof is awkward because the registry
+  method owns the child `AssetTotals` object. A useful verifier improvement
+  would retain or re-export exact child-observer snapshots across imported
+  opaque child calls without requiring DEX-specific wrapper facts. Repro:
+  add those postconditions/assertions to `PoolRegistry.deletePool` and run
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 4 --verify playground/invar/dex2/lib/PoolRegistry.sr9`.
+
+- Post-OP7 attack-observer improvement on 2026-05-18: added verified depth-5
+  same-pool public-action closed-loop no-profit kernels:
+  `closedLoopNoProfitDepth5` and `publicActionClosedLoopNoProfitDepth5`.
+  Direct verification passed with
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 4 --verify playground/invar/dex2/proofs/AttackObservers.sr9`.

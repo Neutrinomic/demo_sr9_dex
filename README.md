@@ -98,8 +98,8 @@ The current verified surface includes these guarantees:
   per relevant key.
 - Round-trip observers prove deposit/withdraw shapes do not create extra local
   tokens beyond the modeled ledger-fee behavior.
-- Attack observers cover bounded same-pool closed-loop action shapes for
-  add/remove/swap receipt arithmetic.
+- Attack observers cover bounded same-pool closed-loop action shapes through
+  depth 5 for add/remove/swap receipt arithmetic.
 - The active DEX2 source has no `trusted` functions; the previous listing and
   pool-removal proof cuts are now verified.
 

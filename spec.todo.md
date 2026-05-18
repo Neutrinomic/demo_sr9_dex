@@ -441,6 +441,8 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   through `publicActionClosedLoopNoProfitDepth4`. These derive target-token
   spend/receive deltas from arbitrary bounded public-action sequences and prove
   `afterTarget <= beforeTarget` from the closed-loop balance equation.
+- [x] Extended the same public-action no-profit observer shape through depth 5
+  after OP7; direct `AttackObservers.sr9` verification passes.
 - [x] Keep the current attack observer kernels same-pool only for this pass.
 
 ## Cleanup
