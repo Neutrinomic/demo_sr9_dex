@@ -362,7 +362,7 @@ module {
     PoolRegistry.createPool(dex.pools, ledgerA, ledgerB)
   };
 
-  public trusted func removePool(
+  public func removePool(
     dex : State,
     caller : Principal,
     ledgerA : Principal,
@@ -384,14 +384,13 @@ module {
     if (ledgerA == ledgerB) {
       return #err(#sameLedger)
     };
-    let infoOpt = PoolRegistry.getInfo(dex.pools, ledgerA, ledgerB);
-    switch (infoOpt) {
+    let poolKey = AssetKey.pool(ledgerA, ledgerB);
+    let holders = BalanceBook.holders(dex.balances, poolKey);
+    switch (PoolRegistry.deletePool(dex.pools, ledgerA, ledgerB)) {
       case null {
         #err(#poolNotFound)
       };
       case (?info) {
-        let poolKey = info.key;
-        let holders = BalanceBook.holders(dex.balances, poolKey);
         var i = 0;
         var remainingA = info.reserveA;
         var remainingB = info.reserveB;
@@ -402,10 +401,12 @@ module {
         var returnedB = 0;
         var controllerLockedA = 0;
         var controllerLockedB = 0;
-        label settle while (i < holders.size()) {
+        while (i < holders.size()) {
           loop:invariant i <= holders.size();
+          loop:invariant dex.controller == old(dex.controller);
+          loop:invariant dex.witness == old(dex.witness);
           let user = holders[i];
-          let shares = BalanceBook.get(dex.balances, user, poolKey);
+          let shares = localBalance(dex, user, poolKey);
           if (shares > 0 and shares <= remainingShares and remainingShares > 0) {
             let lastUser = (i + 1 == holders.size()) and info.lockedShares == 0;
             let amountA = if (lastUser) { remainingA } else { (shares * remainingA) / remainingShares };
@@ -431,7 +432,6 @@ module {
           remainingA := 0;
           remainingB := 0
         };
-        ignore PoolRegistry.deletePool(dex.pools, ledgerA, ledgerB);
         #ok({
           key = poolKey;
           ledgerA = info.ledgerA;

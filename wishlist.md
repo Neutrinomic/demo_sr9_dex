@@ -4,7 +4,7 @@ This file records the top verifier ergonomics improvements exposed while
 building and verifying this DEX demo. These are not requests for DEX-specific
 compiler behavior. They are generic SR9 capabilities that would make
 protocol-scale verified applications cleaner, safer, and less dependent on
-trusted proof cuts.
+proof-shaped runtime scaffolding or trusted escape hatches.
 
 ## 1. Verified Collection Enumeration Over Opaque-Owned Maps
 
@@ -23,15 +23,16 @@ Why it matters:
 
 Real protocols often need bulk settlement paths: list all LP holders, list all
 balances for a user, list all pools, return funds during shutdown, or prove that
-no claim was skipped. Without ergonomic verified enumeration, those paths become
-trusted even when the runtime code is straightforward.
+no claim was skipped. Without ergonomic verified enumeration, those paths are
+pushed toward proof cuts or manual key-log structures even when the runtime code
+is straightforward.
 
 What it would clean up here:
 
 - owner-maintained key logs used only to avoid opaque iterator escape issues;
 - duplicate-log reasoning where every scan rechecks live state;
-- trusted listing and holder-discovery cuts;
-- much of the proof difficulty around pool removal and ledger retirement
+- listing and holder-discovery code that previously needed trusted cuts;
+- much of the remaining proof difficulty around pool removal and ledger retirement
   cleanup.
 
 The ideal outcome is that a module can expose a verified listing API with clear
@@ -122,5 +123,5 @@ The three most valuable verifier improvements are:
 2. stronger compositional framing for nested opaque owners;
 3. modular async/await proof support for protocol helper modules.
 
-Together, these would remove most of the remaining trusted cuts and proof-shaped
-runtime structure from this demo while preserving the same safety model.
+Together, these would remove most of the remaining proof-shaped runtime
+structure from this demo while preserving the same safety model.

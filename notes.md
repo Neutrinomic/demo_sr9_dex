@@ -1311,3 +1311,33 @@
   on `lib/Pool.sr9`, `lib/PoolRegistry.sr9`, `lib/Dex.sr9`,
   `DexActorDemo.sr9`, `proofs/InvariantObservers.sr9`,
   `proofs/LedgerRoundTripObservers.sr9`, and `proofs/AttackObservers.sr9`.
+
+- OP7 follow-up on 2026-05-18: the active DEX2 code now has zero `trusted`
+  functions. `BalanceBook.balances`, `BalanceBook.holders`,
+  `BalanceBook.firstNonControllerHolder`, `PoolRegistry.list`, and
+  `Dex.removePool` are ordinary verified functions. The listing helpers use
+  explicit field-level read-only loop frames, `PoolRegistry.list` observes pool
+  handles through `Pool.info`, and `Dex.removePool` reads holder balances
+  through the top-level `Dex.localBalance` surface inside its settlement loop.
+
+- Tightened `Dex.removePool` while removing the proof cut: settlement is now
+  gated by `PoolRegistry.deletePool`. If registry deletion fails, the function
+  returns `#err(#poolNotFound)` before converting local LP balances. This avoids
+  the old fail-open shape where the delete result was ignored after settlement.
+
+- Tried to assert the LP-share debit result directly in `Dex.removePool`:
+  `let debited = BalanceBook.debit(...); assert debited;`. Verification failed
+  at that assertion because the current `BalanceBook` contracts expose local
+  balances and cached totals separately, but do not prove an invariant that the
+  cached total is always at least each individual holder balance. Runtime state
+  reaches that condition through the module transitions, but the verifier needs
+  a stronger BalanceBook-level aggregate invariant or debit success
+  postcondition to consume it locally. The assertion was removed and the
+  verified deletion-first settlement shape was kept.
+
+- Full DEX2 gate passed after OP7 cleanup:
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.zQtV3d`. The slowest
+  `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
+  200.385s, `DexActorDemo.sr9` 194.760s,
+  `LedgerRoundTripObservers.sr9` 192.087s, and `Dex.sr9` 173.712s.

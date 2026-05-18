@@ -78,8 +78,11 @@ module {
     requires true;
   {
     var i = 0;
-    label scan while (i < BSeq.size<Text>(registry.poolKeys)) {
+    while (i < BSeq.size<Text>(registry.poolKeys)) {
       loop:invariant i <= BSeq.size<Text>(registry.poolKeys);
+      loop:invariant registry.pools == old(registry.pools);
+      loop:invariant registry.ledgerPoolCounts == old(registry.ledgerPoolCounts);
+      loop:invariant registry.nextId == old(registry.nextId);
       if (BSeq.getNat<Text>(registry.poolKeys, i) == key) {
         return true
       };
@@ -718,20 +721,22 @@ module {
     }
   };
 
-  public trusted func list(registry : PoolRegistry) : [Types.PoolInfo]
+  public func list(registry : PoolRegistry) : [Types.PoolInfo]
     requires true;
     ensures model(registry) == old(model(registry));
   {
     var seq = BSeq.empty<Types.PoolInfo>();
     var i = 0;
-    label scan while (i < BSeq.size<Text>(registry.poolKeys)) {
+    while (i < BSeq.size<Text>(registry.poolKeys)) {
       loop:invariant i <= BSeq.size<Text>(registry.poolKeys);
-      loop:invariant model(registry) == old(model(registry));
+      loop:invariant registry.pools == old(registry.pools);
+      loop:invariant registry.ledgerPoolCounts == old(registry.ledgerPoolCounts);
+      loop:invariant registry.nextId == old(registry.nextId);
       let key = BSeq.getNat<Text>(registry.poolKeys, i);
       switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
         case null {};
         case (?pool) {
-          seq := BSeq.append<Types.PoolInfo>(seq, Pool.model(pool))
+          seq := BSeq.append<Types.PoolInfo>(seq, Pool.info(pool))
         }
       };
       i += 1

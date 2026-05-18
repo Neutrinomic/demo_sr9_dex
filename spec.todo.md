@@ -3,10 +3,10 @@
 This file tracks the current state of `playground/invar/dex2/spec.md`.
 It is intentionally a live engineering checklist, not the original build plan.
 
-OP5 verifier-performance work has landed and the final Viper suite is green.
-Transitive VPR item slicing is default-on. DEX2 work can continue with normal
-focused verification again, but still record timing data for large proof
-changes because DEX2 remains a heavy protocol-scale file.
+OP5 verifier-performance work has landed and OP7 listing/settlement support is
+available. Transitive VPR item slicing is default-on. DEX2 work can continue
+with normal focused verification again, but still record timing data for large
+proof changes because DEX2 remains a heavy protocol-scale file.
 
 ## Current Reality
 
@@ -28,8 +28,8 @@ changes because DEX2 remains a heavy protocol-scale file.
   user balances.
 - [x] Platform fees are credited to the controller local balance during swaps.
 - [x] Ledger lifecycle has active/retiring removal flow.
-- [x] Pool removal is controller-only and converts user LP shares back into
-  local token balances.
+- [x] Pool removal is controller-only, requires successful registry deletion,
+  and converts user LP shares back into local token balances.
 - [x] Performance notes and minimal repros are recorded:
   `playground/invar/dex2/notes.md` and
   `playground/invar/repro/perf_declonly/`.
@@ -45,17 +45,17 @@ changes because DEX2 remains a heavy protocol-scale file.
   defaults after the 2026-05-17 cleanup.
 - [x] Raw Silicon over emitted DEX VPR passed. OP5 kept raw Silicon in the same
   order of magnitude and reduced DEX2 generation/lowering substantially.
-- [x] Current trusted count is 5:
-  - `BalanceBook.balances`
-  - `BalanceBook.holders`
-  - `BalanceBook.firstNonControllerHolder`
-  - `PoolRegistry.list`
-  - `Dex.removePool`
+- [x] Current active DEX2 trusted count is 0. OP7 removed the previous five
+  trusted cuts:
+  `BalanceBook.balances`, `BalanceBook.holders`,
+  `BalanceBook.firstNonControllerHolder`, `PoolRegistry.list`, and
+  `Dex.removePool`.
 - [x] Re-run full `DexActorDemo.sr9` verification now that OP5 performance
   fixes are default-on.
 - [x] Keep `notes.md` updated immediately when a verifier bug, unsoundness
   concern, or bad ergonomics issue blocks a real proof.
-- [x] No new DEX2 `trusted` functions were added during the 2026-05-17 cleanup.
+- [x] No new DEX2 `trusted` functions were added during the 2026-05-17 cleanup
+  or the 2026-05-18 OP7 cleanup.
 
 ## OP5 Performance Status And DEX2 Verification Lane
 
@@ -114,11 +114,13 @@ changes because DEX2 remains a heavy protocol-scale file.
 - [x] `BalanceBook.total` is verified without `trusted`.
 - [x] Removed `UserBalances.sr9`; the current active path is the flat
   `BalanceBook`.
-- [ ] Remove trusted cuts from `BalanceBook.balances`,
+- [x] Remove trusted cuts from `BalanceBook.balances`,
   `BalanceBook.holders`, and `BalanceBook.firstNonControllerHolder`.
 - [x] Retried removing the BalanceBook listing/holder trusted cuts on
   2026-05-17; they still hit opaque frame/permission limits recorded in
   `notes.md`.
+- [x] Removed the BalanceBook listing/holder trusted cuts on 2026-05-18 after
+  OP7 added read-only owner scan framing and exact sequence/listing support.
 - [x] Prove useful listing guarantees for balances and holders, or explicitly
   document that list ordering/duplication is a runtime-only surface while
   accounting proofs rely on totals.
@@ -181,10 +183,13 @@ changes because DEX2 remains a heavy protocol-scale file.
 - [x] `PoolRegistry` tracks reserve totals with `AssetTotals`.
 - [x] `PoolRegistry` routes swaps in both directions.
 - [x] `PoolRegistry` tracks share supply and locked share supply.
-- [ ] Remove trusted cut from `PoolRegistry.list`.
+- [x] Remove trusted cut from `PoolRegistry.list`.
 - [x] Retried removing the `PoolRegistry.list` trusted cut on 2026-05-17; it
   still fails on read-only model framing and opaque handle policy constraints
   recorded in `notes.md`.
+- [x] Removed the `PoolRegistry.list` trusted cut on 2026-05-18 after OP7; the
+  scan keeps explicit field-level frames and observes pools through
+  `Pool.info`.
 - [ ] Strengthen registry facts for `containsLedger`, reserve totals, share
   totals, and pool deletion.
 - [x] `PoolRegistry.containsLedger` now has an import-safe exact contract:
@@ -297,10 +302,13 @@ changes because DEX2 remains a heavy protocol-scale file.
 - [x] Add `Dex.ledgerSettled` and a conditional successful-deposit net delta:
   if ledger accounting was settled before the deposit, `ledgerNet` increases by
   the deposited amount.
-- [ ] Remove trusted cut from `Dex.removePool`.
+- [x] Remove trusted cut from `Dex.removePool`.
 - [x] Retried removing the `Dex.removePool` trusted cut on 2026-05-17; it still
   fails on top-level controller/owner framing after pool deletion, recorded in
   `notes.md`.
+- [x] Removed the `Dex.removePool` trusted cut on 2026-05-18. The verified
+  implementation now gates settlement on successful `PoolRegistry.deletePool`
+  instead of ignoring the delete result.
 - [x] Strengthen actor-facing ensures beyond controller preservation where the
   verifier can use them cheaply.
 - [x] Expose the successful liquidity LP-share delta guarantee on
@@ -424,7 +432,7 @@ changes because DEX2 remains a heavy protocol-scale file.
 
 - [x] Remove unused files and modules after deciding the final architecture:
   removed `UserBalances.sr9` and `LedgerOps.sr9`.
-- [ ] Remove all DEX2 `trusted` functions.
+- [x] Remove all DEX2 `trusted` functions.
 - [x] Replace remaining literal weak `ensures true` contracts in active DEX2
   code. `PendingWithdrawals.get` and `PendingReturns.get` now guarantee that
   non-null records carry positive pending amounts; stronger exact null/value
@@ -440,13 +448,10 @@ changes because DEX2 remains a heavy protocol-scale file.
 
 ## Fast Next Steps
 
-1. Decide the deliberate proof boundary for listing functions: either add a
-   verifier fix for read-only opaque scans or document them as runtime-only
-   payload surfaces while accounting proofs rely on cached totals.
-2. Revisit `Dex.removePool` after a smaller registry deletion/frame summary is
-   available.
-3. Try one narrow state-level conservation transition at a time once the
+1. Try one narrow state-level conservation transition at a time once the
    parent/child opaque summary retention issues are fixed or a smaller summary
    module is available.
-4. Keep running `DexActorDemo.sr9` after each proof-surface change and append
+2. Strengthen the BalanceBook total/local consistency story so LP-share debit
+   success can be asserted directly in settlement loops.
+3. Keep running `DexActorDemo.sr9` after each proof-surface change and append
    any new verifier limitation to `notes.md`.

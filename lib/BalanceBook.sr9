@@ -156,17 +156,18 @@ module {
     true
   };
 
-  public trusted func balances(book : BalanceBook, user : Principal) : [BalanceEntry]
+  public func balances(book : BalanceBook, user : Principal) : [BalanceEntry]
     requires true;
     ensures model(book) == old(model(book));
     ensures totalModel(book) == old(totalModel(book));
   {
     var seq = BSeq.empty<BalanceEntry>();
     var i = 0;
-    label scan while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
+    while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
       loop:invariant i <= BSeq.size<(Text, Principal)>(book.holderLog);
-      loop:invariant model(book) == old(model(book));
-      loop:invariant totalModel(book) == old(totalModel(book));
+      loop:invariant book.balances == old(book.balances);
+      loop:invariant book.totals == old(book.totals);
+      loop:invariant book.seen == old(book.seen);
       let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
       if (item.1 == user) {
         let amount = get(book, user, item.0);
@@ -176,20 +177,24 @@ module {
       };
       i += 1
     };
-    BSeq.toArray<BalanceEntry>(seq)
+    let out = BSeq.toArray<BalanceEntry>(seq);
+    assert model(book) == old(model(book));
+    assert totalModel(book) == old(totalModel(book));
+    out
   };
 
-  public trusted func holders(book : BalanceBook, key : Text) : [Principal]
+  public func holders(book : BalanceBook, key : Text) : [Principal]
     requires true;
     ensures model(book) == old(model(book));
     ensures totalModel(book) == old(totalModel(book));
   {
     var seq = BSeq.empty<Principal>();
     var i = 0;
-    label scan while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
+    while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
       loop:invariant i <= BSeq.size<(Text, Principal)>(book.holderLog);
-      loop:invariant model(book) == old(model(book));
-      loop:invariant totalModel(book) == old(totalModel(book));
+      loop:invariant book.balances == old(book.balances);
+      loop:invariant book.totals == old(book.totals);
+      loop:invariant book.seen == old(book.seen);
       let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
       let user = item.1;
       if (item.0 == key and get(book, user, key) > 0) {
@@ -200,7 +205,7 @@ module {
     BSeq.toArray<Principal>(seq)
   };
 
-  public trusted func firstNonControllerHolder(
+  public func firstNonControllerHolder(
     book : BalanceBook,
     key : Text,
     controller : Principal
@@ -211,10 +216,11 @@ module {
   {
     let holderList = holders(book, key);
     var i = 0;
-    label scan while (i < holderList.size()) {
+    while (i < holderList.size()) {
       loop:invariant i <= holderList.size();
-      loop:invariant model(book) == old(model(book));
-      loop:invariant totalModel(book) == old(totalModel(book));
+      loop:invariant book.balances == old(book.balances);
+      loop:invariant book.totals == old(book.totals);
+      loop:invariant book.seen == old(book.seen);
       let user = holderList[i];
       if (user != controller and get(book, user, key) > 0) {
         return ?user

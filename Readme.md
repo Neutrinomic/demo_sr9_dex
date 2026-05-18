@@ -38,9 +38,9 @@ are checked as part of the normal development workflow.
   run forced returns that move a user's full local balance into pending state,
   send the withdrawable amount back through the external ledger, and restore the
   exact local balance if the ledger call fails or rejects.
-- LP settlement on pool removal: user-held virtual LP-share balances are burned
-  into local token balances before the pool is deleted, so pool cleanup is
-  modeled as a conversion of user claims rather than a silent deletion.
+- LP settlement on pool removal: pool deletion must succeed before user-held
+  virtual LP-share balances are burned into local token balances, so cleanup is
+  modeled as a guarded conversion of user claims rather than a silent deletion.
 - Virtual ledgers for LP positions: pool shares live in the same local balance
   book as real ledger balances, which makes user portfolio views and proof
   accounting use one model.
@@ -93,6 +93,8 @@ The current verified surface includes these guarantees:
   tokens beyond the modeled ledger-fee behavior.
 - Attack observers cover bounded same-pool closed-loop action shapes for
   add/remove/swap receipt arithmetic.
+- The active DEX2 source has no `trusted` functions; the previous listing and
+  pool-removal proof cuts are now verified.
 
 ## Guardrails
 
@@ -111,6 +113,8 @@ The demo intentionally keeps several controls visible:
   and rejects have explicit recovery paths.
 - Public query surfaces are separated from accounting facts; core accounting
   relies on verified totals and local transition contracts.
+- Read-only listing helpers are verified without `trusted`, including balance
+  listings, LP-holder discovery, pool listings, and pool-removal settlement.
 
 ## Remaining Non-Production Risks
 
@@ -118,8 +122,6 @@ The following are known reasons this is still a demo:
 
 - The DEX trusts whitelisted external ledgers to behave like standard truthful
   ICRC ledgers.
-- Pool removal still contains a trusted proof boundary.
-- Some listing/holder discovery helpers are trusted proof boundaries.
 - Dust balances can block retiring-ledger cleanup.
 - Locked-liquidity shutdown policy is still a protocol-design choice.
 - Outbound duplicate-transfer semantics need a clearer production policy.
@@ -147,34 +149,35 @@ postconditions, and record verifier limitations separately.
 
 ## Verification
 
-These timings were measured on 2026-05-17 in the SR9 workspace with:
+These timings were measured on 2026-05-18 in the SR9 workspace with:
 
 ```bash
 XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 1 --verify <target>
 ```
 
-They are wall-clock seconds from this machine and cache state, not a portable
-benchmark. The important column is that every target currently verifies.
+They are per-target `verify.pipeline_viper_files` seconds from this machine and
+cache state, not a portable benchmark. The important column is that every
+target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `lib/Types.sr9` | PASS | 0.349 |
-| `lib/AssetKey.sr9` | PASS | 0.729 |
-| `lib/AssetTotals.sr9` | PASS | 8.521 |
-| `lib/BalanceBook.sr9` | PASS | 16.102 |
-| `lib/LedgerSet.sr9` | PASS | 7.031 |
-| `lib/InFlightDeposits.sr9` | PASS | 5.708 |
-| `lib/PendingWithdrawals.sr9` | PASS | 7.000 |
-| `lib/PendingReturns.sr9` | PASS | 7.069 |
-| `lib/LedgerAccounting.sr9` | PASS | 5.809 |
-| `lib/AmmMath.sr9` | PASS | 0.882 |
-| `lib/Pool.sr9` | PASS | 1.198 |
-| `lib/PoolRegistry.sr9` | PASS | 42.214 |
-| `lib/Dex.sr9` | PASS | 138.929 |
-| `proofs/InvariantObservers.sr9` | PASS | 167.695 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 170.662 |
-| `proofs/AttackObservers.sr9` | PASS | 1.220 |
-| `DexActorDemo.sr9` | PASS | 197.151 |
+| `lib/Types.sr9` | PASS | 0.283 |
+| `lib/AssetKey.sr9` | PASS | 0.709 |
+| `lib/AssetTotals.sr9` | PASS | 10.400 |
+| `lib/BalanceBook.sr9` | PASS | 19.191 |
+| `lib/LedgerSet.sr9` | PASS | 8.561 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.194 |
+| `lib/PendingWithdrawals.sr9` | PASS | 8.860 |
+| `lib/PendingReturns.sr9` | PASS | 8.798 |
+| `lib/LedgerAccounting.sr9` | PASS | 7.346 |
+| `lib/AmmMath.sr9` | PASS | 0.843 |
+| `lib/Pool.sr9` | PASS | 1.205 |
+| `lib/PoolRegistry.sr9` | PASS | 53.032 |
+| `lib/Dex.sr9` | PASS | 173.712 |
+| `proofs/InvariantObservers.sr9` | PASS | 200.385 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 192.087 |
+| `proofs/AttackObservers.sr9` | PASS | 1.116 |
+| `DexActorDemo.sr9` | PASS | 194.760 |
 
 ## Development Rule
 
