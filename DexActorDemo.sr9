@@ -1,8 +1,10 @@
 import AssetKey "./lib/AssetKey";
 import AmmMath "./lib/AmmMath";
 import BalanceBook "./lib/BalanceBook";
+import BSeq "mo:core/pure/BSeq";
 import Dex "./lib/Dex";
 import ICRCLedger "mo:core/pattern/ICRCLedger";
+import PoolRegistry "./lib/PoolRegistry";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Types "./lib/Types";
@@ -312,6 +314,12 @@ persistent actor class DexActorDemo(controller : Principal) {
     reads dex, controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result))) {
+        PoolRegistry.poolInfoHealthy(
+          Seq.get<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result), i)
+        )
+      } else { true });
   {
     Dex.pools(dex)
   };

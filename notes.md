@@ -1341,3 +1341,32 @@
   `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
   200.385s, `DexActorDemo.sr9` 194.760s,
   `LedgerRoundTripObservers.sr9` 192.087s, and `Dex.sr9` 173.712s.
+
+- OP7 follow-up listing contracts on 2026-05-18:
+  `BalanceBook.balances` now proves every returned `(ledgerKey, amount)` entry
+  has `amount > 0` and matches the book model for that user/key.
+  `BalanceBook.holders` now proves every returned holder has a positive
+  balance for the requested key, and `firstNonControllerHolder` exposes the
+  same fact for a non-null result. These guarantees verified once the listing
+  loops used direct private `mapGet` reads instead of routing through the public
+  `get` helper inside quantified sequence invariants.
+
+- `PoolRegistry.list` now proves every returned `PoolInfo` is healthy: the
+  ledgers differ, locked shares are bounded by total shares, empty pools have
+  zero reserves and locked shares, and live share-bearing pools have positive
+  reserves. `Dex.pools` and `DexActorDemo.pools` lift that payload guarantee to
+  the public surfaces. The full DEX2 gate passed with these additions:
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.a1EYv2`; the slowest
+  `verify.pipeline_viper_files` entries were `DexActorDemo.sr9` 213.214s,
+  `InvariantObservers.sr9` 204.221s, `LedgerRoundTripObservers.sr9` 198.450s,
+  and `Dex.sr9` 177.742s.
+
+- Tried to lift the `BalanceBook.balances` payload guarantee through
+  `Dex.balances`. Keeping the postcondition at the parent `State` boundary did
+  not verify cleanly: the parent owner summary could not consume the child
+  `BalanceBook` payload predicate, and forcing the assertion over the tuple
+  array snapshot also hit a Viper type error. The verified guarantee remains at
+  the BalanceBook module boundary for now; lifting it should be retried after
+  parent/child opaque summary projection and tuple-array snapshot handling are
+  improved.

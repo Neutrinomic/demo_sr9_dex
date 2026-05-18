@@ -56,6 +56,10 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   concern, or bad ergonomics issue blocks a real proof.
 - [x] No new DEX2 `trusted` functions were added during the 2026-05-17 cleanup
   or the 2026-05-18 OP7 cleanup.
+- [x] OP7 follow-up listing payload contracts verify: `BalanceBook.balances`,
+  `BalanceBook.holders`, `BalanceBook.firstNonControllerHolder`, and
+  `PoolRegistry.list` expose useful facts about every returned entry; the pool
+  list health facts also lift through `Dex.pools` and `DexActorDemo.pools`.
 
 ## OP5 Performance Status And DEX2 Verification Lane
 
@@ -124,6 +128,9 @@ proof changes because DEX2 remains a heavy protocol-scale file.
 - [x] Prove useful listing guarantees for balances and holders, or explicitly
   document that list ordering/duplication is a runtime-only surface while
   accounting proofs rely on totals.
+- [x] `BalanceBook.balances` now proves every returned entry is positive and
+  matches the model for the requested user/key; `holders` and
+  `firstNonControllerHolder` prove positive-balance holder facts.
 
 ### Ledger Lifecycle And Pending State
 
@@ -225,6 +232,8 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   facts proven by `Pool.info`: locked shares are bounded by total shares,
   empty pools have zero reserves and zero locked shares, and live share-bearing
   pools have positive reserves.
+- [x] `PoolRegistry.list`, `Dex.pools`, and `DexActorDemo.pools` now expose the
+  same pool health facts for every returned pool info entry.
 - [x] `PoolRegistry.getInfo`, `getInfoByKey`, and `deletePool` now reject
   internally inconsistent map entries whose stored pool key does not match the
   lookup key, and successful results expose the canonical key.

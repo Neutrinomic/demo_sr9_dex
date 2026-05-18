@@ -100,6 +100,24 @@ module {
     mapGet(book.totals, key)
   };
 
+  public ghost func balanceEntryMatches(book : BalanceBook, user : Principal, entry : BalanceEntry) : Bool
+    requires true;
+    ensures result == (
+      entry.1 > 0 and
+      entry.1 == Map.getOr<Text, Nat>(model(book), recordKey(user, entry.0), 0)
+    );
+  {
+    entry.1 > 0 and
+      entry.1 == Map.getOr<Text, Nat>(model(book), recordKey(user, entry.0), 0)
+  };
+
+  public ghost func holderMatches(book : BalanceBook, key : Text, user : Principal) : Bool
+    requires true;
+    ensures result == (Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0) > 0);
+  {
+    Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0) > 0
+  };
+
   public func credit(book : BalanceBook, user : Principal, key : Text, amount : Nat) : ()
     requires true;
     ensures total(book, key) == old(total(book, key)) + amount;
@@ -160,6 +178,10 @@ module {
     requires true;
     ensures model(book) == old(model(book));
     ensures totalModel(book) == old(totalModel(book));
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<BalanceEntry>(BSeq.Spec.arrayToSeq<BalanceEntry>(result))) {
+        balanceEntryMatches(book, user, Seq.get<BalanceEntry>(BSeq.Spec.arrayToSeq<BalanceEntry>(result), i))
+      } else { true });
   {
     var seq = BSeq.empty<BalanceEntry>();
     var i = 0;
@@ -168,9 +190,13 @@ module {
       loop:invariant book.balances == old(book.balances);
       loop:invariant book.totals == old(book.totals);
       loop:invariant book.seen == old(book.seen);
+      loop:invariant forall<Int>(pure func (j : Int) : Bool =
+        if (0 <= j and j < BSeq.len<BalanceEntry>(seq)) {
+          balanceEntryMatches(book, user, Seq.get<BalanceEntry>(BSeq.Spec.model<BalanceEntry>(seq), j))
+        } else { true });
       let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
       if (item.1 == user) {
-        let amount = get(book, user, item.0);
+        let amount = mapGet(book.balances, recordKey(user, item.0));
         if (amount > 0) {
           seq := BSeq.append<BalanceEntry>(seq, (item.0, amount))
         }
@@ -187,6 +213,10 @@ module {
     requires true;
     ensures model(book) == old(model(book));
     ensures totalModel(book) == old(totalModel(book));
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<Principal>(BSeq.Spec.arrayToSeq<Principal>(result))) {
+        holderMatches(book, key, Seq.get<Principal>(BSeq.Spec.arrayToSeq<Principal>(result), i))
+      } else { true });
   {
     var seq = BSeq.empty<Principal>();
     var i = 0;
@@ -195,9 +225,13 @@ module {
       loop:invariant book.balances == old(book.balances);
       loop:invariant book.totals == old(book.totals);
       loop:invariant book.seen == old(book.seen);
+      loop:invariant forall<Int>(pure func (j : Int) : Bool =
+        if (0 <= j and j < BSeq.len<Principal>(seq)) {
+          holderMatches(book, key, Seq.get<Principal>(BSeq.Spec.model<Principal>(seq), j))
+        } else { true });
       let item = BSeq.getNat<(Text, Principal)>(book.holderLog, i);
       let user = item.1;
-      if (item.0 == key and get(book, user, key) > 0) {
+      if (item.0 == key and mapGet(book.balances, recordKey(user, key)) > 0) {
         seq := BSeq.append<Principal>(seq, user)
       };
       i += 1
@@ -213,6 +247,10 @@ module {
     requires true;
     ensures model(book) == old(model(book));
     ensures totalModel(book) == old(totalModel(book));
+    ensures switch (result) {
+      case null { true };
+      case (?user) { user != controller and holderMatches(book, key, user) }
+    };
   {
     let holderList = holders(book, key);
     var i = 0;
@@ -222,7 +260,7 @@ module {
       loop:invariant book.totals == old(book.totals);
       loop:invariant book.seen == old(book.seen);
       let user = holderList[i];
-      if (user != controller and get(book, user, key) > 0) {
+      if (user != controller and mapGet(book.balances, recordKey(user, key)) > 0) {
         return ?user
       };
       i += 1

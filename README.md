@@ -87,6 +87,12 @@ The current verified surface includes these guarantees:
 - Pool removal converts user LP positions back into local token balances before
   deleting the pool.
 - Balance totals are cached and checked through module contracts.
+- Balance listing surfaces prove every returned entry is positive and matches
+  the underlying model for that user/key.
+- Holder listing surfaces prove every returned holder has a positive balance
+  for the requested asset key.
+- Pool listing surfaces prove every returned pool info entry satisfies the same
+  pool-health facts as direct pool lookup.
 - Pending deposit, withdrawal, and return modules enforce one active operation
   per relevant key.
 - Round-trip observers prove deposit/withdraw shapes do not create extra local
@@ -149,10 +155,11 @@ postconditions, and record verifier limitations separately.
 
 ## Verification
 
-These timings were measured on 2026-05-18 in the SR9 workspace with:
+These timings were measured on 2026-05-18 in the SR9 workspace with the full
+DEX2 gate:
 
 ```bash
-XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 1 --verify <target>
+JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh
 ```
 
 They are per-target `verify.pipeline_viper_files` seconds from this machine and
@@ -161,23 +168,25 @@ target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `lib/Types.sr9` | PASS | 0.283 |
-| `lib/AssetKey.sr9` | PASS | 0.709 |
-| `lib/AssetTotals.sr9` | PASS | 10.400 |
-| `lib/BalanceBook.sr9` | PASS | 19.191 |
-| `lib/LedgerSet.sr9` | PASS | 8.561 |
-| `lib/InFlightDeposits.sr9` | PASS | 7.194 |
-| `lib/PendingWithdrawals.sr9` | PASS | 8.860 |
-| `lib/PendingReturns.sr9` | PASS | 8.798 |
-| `lib/LedgerAccounting.sr9` | PASS | 7.346 |
-| `lib/AmmMath.sr9` | PASS | 0.843 |
-| `lib/Pool.sr9` | PASS | 1.205 |
-| `lib/PoolRegistry.sr9` | PASS | 53.032 |
-| `lib/Dex.sr9` | PASS | 173.712 |
-| `proofs/InvariantObservers.sr9` | PASS | 200.385 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 192.087 |
-| `proofs/AttackObservers.sr9` | PASS | 1.116 |
-| `DexActorDemo.sr9` | PASS | 194.760 |
+| `core/src/Principal.sr9` | PASS | 0.275 |
+| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.324 |
+| `lib/Types.sr9` | PASS | 0.287 |
+| `lib/AssetKey.sr9` | PASS | 0.716 |
+| `lib/AssetTotals.sr9` | PASS | 10.584 |
+| `lib/BalanceBook.sr9` | PASS | 19.854 |
+| `lib/LedgerSet.sr9` | PASS | 8.765 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.342 |
+| `lib/PendingWithdrawals.sr9` | PASS | 9.101 |
+| `lib/PendingReturns.sr9` | PASS | 9.070 |
+| `lib/LedgerAccounting.sr9` | PASS | 7.505 |
+| `lib/AmmMath.sr9` | PASS | 0.861 |
+| `lib/Pool.sr9` | PASS | 1.233 |
+| `lib/PoolRegistry.sr9` | PASS | 53.534 |
+| `lib/Dex.sr9` | PASS | 177.742 |
+| `proofs/InvariantObservers.sr9` | PASS | 204.221 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 198.450 |
+| `proofs/AttackObservers.sr9` | PASS | 1.111 |
+| `DexActorDemo.sr9` | PASS | 213.214 |
 
 ## Development Rule
 

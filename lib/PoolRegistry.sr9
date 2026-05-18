@@ -33,6 +33,27 @@ module {
     BMap.size<Text, Pool.Pool>(registry.pools)
   };
 
+  public ghost func poolInfoHealthy(info : Types.PoolInfo) : Bool
+    requires true;
+    ensures result == (
+      info.ledgerA != info.ledgerB and
+      info.lockedShares <= info.totalShares and
+      (info.totalShares == 0 ==> info.lockedShares == 0) and
+      (info.totalShares == 0 ==> info.reserveA == 0) and
+      (info.totalShares == 0 ==> info.reserveB == 0) and
+      (info.totalShares > 0 ==> info.reserveA > 0) and
+      (info.totalShares > 0 ==> info.reserveB > 0)
+    );
+  {
+    info.ledgerA != info.ledgerB and
+      info.lockedShares <= info.totalShares and
+      (info.totalShares == 0 ==> info.lockedShares == 0) and
+      (info.totalShares == 0 ==> info.reserveA == 0) and
+      (info.totalShares == 0 ==> info.reserveB == 0) and
+      (info.totalShares > 0 ==> info.reserveA > 0) and
+      (info.totalShares > 0 ==> info.reserveB > 0)
+  };
+
   private pure func countGet(map : BMap.BMap<Text, Nat>, key : Text) : Nat
     requires true;
     ensures result == Map.getOr<Text, Nat>(BMap.Spec.model<Text, Nat>(map), key, 0);
@@ -724,6 +745,10 @@ module {
   public func list(registry : PoolRegistry) : [Types.PoolInfo]
     requires true;
     ensures model(registry) == old(model(registry));
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result))) {
+        poolInfoHealthy(Seq.get<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result), i))
+      } else { true });
   {
     var seq = BSeq.empty<Types.PoolInfo>();
     var i = 0;
@@ -732,6 +757,10 @@ module {
       loop:invariant registry.pools == old(registry.pools);
       loop:invariant registry.ledgerPoolCounts == old(registry.ledgerPoolCounts);
       loop:invariant registry.nextId == old(registry.nextId);
+      loop:invariant forall<Int>(pure func (j : Int) : Bool =
+        if (0 <= j and j < BSeq.len<Types.PoolInfo>(seq)) {
+          poolInfoHealthy(Seq.get<Types.PoolInfo>(BSeq.Spec.model<Types.PoolInfo>(seq), j))
+        } else { true });
       let key = BSeq.getNat<Text>(registry.poolKeys, i);
       switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
         case null {};

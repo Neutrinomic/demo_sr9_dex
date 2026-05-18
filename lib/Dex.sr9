@@ -1,6 +1,7 @@
 import AssetKey "./AssetKey";
 import AmmMath "./AmmMath";
 import BalanceBook "./BalanceBook";
+import BSeq "mo:core/pure/BSeq";
 import ICRCLedger "mo:core/pattern/ICRCLedger";
 import InFlightDeposits "./InFlightDeposits";
 import LedgerAccounting "./LedgerAccounting";
@@ -75,6 +76,12 @@ module {
   public func pools(dex : State) : [Types.PoolInfo]
     requires true;
     ensures model(dex) == old(model(dex));
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result))) {
+        PoolRegistry.poolInfoHealthy(
+          Seq.get<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result), i)
+        )
+      } else { true });
   {
     PoolRegistry.list(dex.pools)
   };
