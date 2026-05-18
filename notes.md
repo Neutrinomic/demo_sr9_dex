@@ -1454,3 +1454,18 @@
   `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
   204.572s, `DexActorDemo.sr9` 199.114s,
   `LedgerRoundTripObservers.sr9` 196.118s, and `Dex.sr9` 178.063s.
+
+- Tried to strengthen `BalanceBook.debit` with direct guard-sufficiency facts:
+  successful debit implies `old(get(book, user, key)) >= amount` and
+  `old(total(book, key)) >= amount`, while failed debit implies one of those old
+  values was insufficient. Direct verification failed on the first success
+  postcondition even though the existing contract already proves
+  `get(book, user, key) + amount == old(get(book, user, key))` on success.
+  Adding local pre-mutation snapshots (`beforeBalance = get(...)`,
+  `beforeTotal = total(...)`) and assertions tying those snapshots to the
+  private `mapGet` reads did not help. Command:
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/lib/BalanceBook.sr9`. This is an
+  ergonomics gap: callers want a simple old-balance sufficiency fact, but the
+  verifier does not derive it from the exact additive postcondition or from
+  obvious pre-mutation snapshots over the same opaque handle.
