@@ -9,6 +9,21 @@ module boundaries, async ledger calls, and machine-checked proof obligations.
 It is a working research/demo artifact for verified DEX design, not something
 to deploy with real user funds.
 
+## Current Snapshot
+
+As of the latest full DEX2 gate on 2026-05-18:
+
+- Every active DEX2 source target in the verification table below passes.
+- The active `.sr9` DEX2 source contains no `trusted` functions.
+- The latest proof upgrade moves more conservation checking onto real `Dex`
+  transitions: successful deposits, deposit prechecks, failed deposit cleanup,
+  quote, and ledger add/retire/final-remove now have state-level observers for
+  `ledgerNet == localObligation + pendingOut`.
+- Swap and liquidity proofs cover ledger-net preservation, receipt equations,
+  LP-share movement facts, and bounded closed-loop no-profit kernels. Some
+  broader aggregate state-level conservation goals remain tracked as future
+  proof work rather than claimed here.
+
 ## What This Demonstrates
 
 This demo models a local-balance DEX that interacts with external ICRC-style
@@ -108,6 +123,10 @@ The current verified surface includes these guarantees:
   depth 6 for add/remove/swap receipt arithmetic.
 - The active DEX2 source has no `trusted` functions; the previous listing and
   pool-removal proof cuts are now verified.
+- The current state-level conservation proof surface covers deposit success
+  and failure paths, quote, and the ledger lifecycle. Swap/liquidity
+  conservation is currently represented by verified ledger-net preservation,
+  receipt equations, LP-share facts, and arithmetic kernels.
 
 ## Guardrails
 
