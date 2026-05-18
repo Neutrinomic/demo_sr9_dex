@@ -60,6 +60,9 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   `BalanceBook.holders`, `BalanceBook.firstNonControllerHolder`, and
   `PoolRegistry.list` expose useful facts about every returned entry; the pool
   list health facts also lift through `Dex.pools` and `DexActorDemo.pools`.
+- [x] Post-OP7 pool listing canonical-key contract verifies: every pool listed
+  by `PoolRegistry.list`, `Dex.pools`, and `DexActorDemo.pools` proves
+  `info.key == AssetKey.pool(info.ledgerA, info.ledgerB)`.
 
 ## OP5 Performance Status And DEX2 Verification Lane
 
@@ -234,6 +237,9 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   pools have positive reserves.
 - [x] `PoolRegistry.list`, `Dex.pools`, and `DexActorDemo.pools` now expose the
   same pool health facts for every returned pool info entry.
+- [x] `PoolRegistry.list` filters internally inconsistent pool records and
+  proves every returned pool info key is canonical for its ledger pair; this
+  lifts through `Dex.pools` and `DexActorDemo.pools`.
 - [x] `PoolRegistry.getInfo`, `getInfoByKey`, and `deletePool` now reject
   internally inconsistent map entries whose stored pool key does not match the
   lookup key, and successful results expose the canonical key.

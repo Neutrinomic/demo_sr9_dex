@@ -82,6 +82,12 @@ module {
           Seq.get<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result), i)
         )
       } else { true });
+    ensures forall<Int>(pure func (i : Int) : Bool =
+      if (0 <= i and i < Seq.len<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result))) {
+        PoolRegistry.poolInfoCanonical(
+          Seq.get<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result), i)
+        )
+      } else { true });
   {
     PoolRegistry.list(dex.pools)
   };

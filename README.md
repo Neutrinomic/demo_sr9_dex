@@ -92,7 +92,8 @@ The current verified surface includes these guarantees:
 - Holder listing surfaces prove every returned holder has a positive balance
   for the requested asset key.
 - Pool listing surfaces prove every returned pool info entry satisfies the same
-  pool-health facts as direct pool lookup.
+  pool-health facts as direct pool lookup, and every listed pool key is
+  canonical for its ledger pair.
 - Pending deposit, withdrawal, and return modules enforce one active operation
   per relevant key.
 - Round-trip observers prove deposit/withdraw shapes do not create extra local
@@ -168,25 +169,25 @@ target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `core/src/Principal.sr9` | PASS | 0.275 |
-| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.324 |
+| `core/src/Principal.sr9` | PASS | 0.281 |
+| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.312 |
 | `lib/Types.sr9` | PASS | 0.287 |
-| `lib/AssetKey.sr9` | PASS | 0.716 |
-| `lib/AssetTotals.sr9` | PASS | 10.584 |
-| `lib/BalanceBook.sr9` | PASS | 19.854 |
-| `lib/LedgerSet.sr9` | PASS | 8.765 |
-| `lib/InFlightDeposits.sr9` | PASS | 7.342 |
-| `lib/PendingWithdrawals.sr9` | PASS | 9.101 |
-| `lib/PendingReturns.sr9` | PASS | 9.070 |
-| `lib/LedgerAccounting.sr9` | PASS | 7.505 |
-| `lib/AmmMath.sr9` | PASS | 0.861 |
-| `lib/Pool.sr9` | PASS | 1.233 |
-| `lib/PoolRegistry.sr9` | PASS | 53.534 |
-| `lib/Dex.sr9` | PASS | 177.742 |
-| `proofs/InvariantObservers.sr9` | PASS | 204.221 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 198.450 |
-| `proofs/AttackObservers.sr9` | PASS | 1.111 |
-| `DexActorDemo.sr9` | PASS | 213.214 |
+| `lib/AssetKey.sr9` | PASS | 0.713 |
+| `lib/AssetTotals.sr9` | PASS | 10.888 |
+| `lib/BalanceBook.sr9` | PASS | 20.213 |
+| `lib/LedgerSet.sr9` | PASS | 8.849 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.577 |
+| `lib/PendingWithdrawals.sr9` | PASS | 9.243 |
+| `lib/PendingReturns.sr9` | PASS | 9.218 |
+| `lib/LedgerAccounting.sr9` | PASS | 7.665 |
+| `lib/AmmMath.sr9` | PASS | 0.879 |
+| `lib/Pool.sr9` | PASS | 1.259 |
+| `lib/PoolRegistry.sr9` | PASS | 54.795 |
+| `lib/Dex.sr9` | PASS | 180.460 |
+| `proofs/InvariantObservers.sr9` | PASS | 210.685 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 202.062 |
+| `proofs/AttackObservers.sr9` | PASS | 1.162 |
+| `DexActorDemo.sr9` | PASS | 210.238 |
 
 ## Development Rule
 

@@ -1370,3 +1370,16 @@
   the BalanceBook module boundary for now; lifting it should be retried after
   parent/child opaque summary projection and tuple-array snapshot handling are
   improved.
+
+- Post-OP7 improvement on 2026-05-18: pool listings now prove canonical keys.
+  `PoolRegistry.list` filters out any internally inconsistent pool record whose
+  reported `PoolInfo.key` does not match both the registry scan key and
+  `AssetKey.pool(info.ledgerA, info.ledgerB)`. The new
+  `PoolRegistry.poolInfoCanonical` predicate is exposed on every listed pool,
+  and the guarantee lifts through `Dex.pools` and `DexActorDemo.pools`.
+  Full gate passed with
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.kReQrp`; the slowest
+  `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
+  210.685s, `DexActorDemo.sr9` 210.238s,
+  `LedgerRoundTripObservers.sr9` 202.062s, and `Dex.sr9` 180.460s.
