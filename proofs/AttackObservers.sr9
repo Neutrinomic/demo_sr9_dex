@@ -225,6 +225,36 @@ module {
     )
   };
 
+  public func closedLoopNoProfitDepth6(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    a0 : TargetDelta,
+    a1 : TargetDelta,
+    a2 : TargetDelta,
+    a3 : TargetDelta,
+    a4 : TargetDelta,
+    a5 : TargetDelta
+  ) : ()
+    requires a0.received + a1.received + a2.received + a3.received +
+      a4.received + a5.received <=
+      a0.spent + a1.spent + a2.spent + a3.spent + a4.spent + a5.spent;
+    requires afterTarget + (
+      a0.spent + a1.spent + a2.spent + a3.spent + a4.spent + a5.spent
+    ) == beforeTarget + (
+      a0.received + a1.received + a2.received + a3.received +
+      a4.received + a5.received
+    );
+    ensures afterTarget <= beforeTarget;
+  {
+    spendReceiveNoProfit(
+      beforeTarget,
+      afterTarget,
+      a0.spent + a1.spent + a2.spent + a3.spent + a4.spent + a5.spent,
+      a0.received + a1.received + a2.received + a3.received +
+        a4.received + a5.received
+    )
+  };
+
   public func publicActionClosedLoopNoProfitDepth1(
     beforeTarget : Nat,
     afterTarget : Nat,
@@ -375,6 +405,64 @@ module {
     let d3 = actionTargetDelta(a3, targetLedger);
     let d4 = actionTargetDelta(a4, targetLedger);
     closedLoopNoProfitDepth5(beforeTarget, afterTarget, d0, d1, d2, d3, d4)
+  };
+
+  public func publicActionClosedLoopNoProfitDepth6(
+    beforeTarget : Nat,
+    afterTarget : Nat,
+    targetLedger : Principal,
+    a0 : PublicAction,
+    a1 : PublicAction,
+    a2 : PublicAction,
+    a3 : PublicAction,
+    a4 : PublicAction,
+    a5 : PublicAction
+  ) : ()
+    requires actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received +
+      actionTargetDelta(a3, targetLedger).received +
+      actionTargetDelta(a4, targetLedger).received +
+      actionTargetDelta(a5, targetLedger).received <=
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent +
+      actionTargetDelta(a3, targetLedger).spent +
+      actionTargetDelta(a4, targetLedger).spent +
+      actionTargetDelta(a5, targetLedger).spent;
+    requires afterTarget + (
+      actionTargetDelta(a0, targetLedger).spent +
+      actionTargetDelta(a1, targetLedger).spent +
+      actionTargetDelta(a2, targetLedger).spent +
+      actionTargetDelta(a3, targetLedger).spent +
+      actionTargetDelta(a4, targetLedger).spent +
+      actionTargetDelta(a5, targetLedger).spent
+    ) == beforeTarget + (
+      actionTargetDelta(a0, targetLedger).received +
+      actionTargetDelta(a1, targetLedger).received +
+      actionTargetDelta(a2, targetLedger).received +
+      actionTargetDelta(a3, targetLedger).received +
+      actionTargetDelta(a4, targetLedger).received +
+      actionTargetDelta(a5, targetLedger).received
+    );
+    ensures afterTarget <= beforeTarget;
+  {
+    let d0 = actionTargetDelta(a0, targetLedger);
+    let d1 = actionTargetDelta(a1, targetLedger);
+    let d2 = actionTargetDelta(a2, targetLedger);
+    let d3 = actionTargetDelta(a3, targetLedger);
+    let d4 = actionTargetDelta(a4, targetLedger);
+    let d5 = actionTargetDelta(a5, targetLedger);
+    closedLoopNoProfitDepth6(
+      beforeTarget,
+      afterTarget,
+      d0,
+      d1,
+      d2,
+      d3,
+      d4,
+      d5
+    )
   };
 
   // Receipt-level kernel for the same-pool swap round trip:

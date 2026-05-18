@@ -99,7 +99,7 @@ The current verified surface includes these guarantees:
 - Round-trip observers prove deposit/withdraw shapes do not create extra local
   tokens beyond the modeled ledger-fee behavior.
 - Attack observers cover bounded same-pool closed-loop action shapes through
-  depth 5 for add/remove/swap receipt arithmetic.
+  depth 6 for add/remove/swap receipt arithmetic.
 - The active DEX2 source has no `trusted` functions; the previous listing and
   pool-removal proof cuts are now verified.
 
@@ -169,25 +169,25 @@ target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `core/src/Principal.sr9` | PASS | 0.281 |
-| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.312 |
-| `lib/Types.sr9` | PASS | 0.287 |
-| `lib/AssetKey.sr9` | PASS | 0.713 |
-| `lib/AssetTotals.sr9` | PASS | 10.888 |
-| `lib/BalanceBook.sr9` | PASS | 20.213 |
-| `lib/LedgerSet.sr9` | PASS | 8.849 |
-| `lib/InFlightDeposits.sr9` | PASS | 7.577 |
-| `lib/PendingWithdrawals.sr9` | PASS | 9.243 |
-| `lib/PendingReturns.sr9` | PASS | 9.218 |
-| `lib/LedgerAccounting.sr9` | PASS | 7.665 |
-| `lib/AmmMath.sr9` | PASS | 0.879 |
-| `lib/Pool.sr9` | PASS | 1.259 |
-| `lib/PoolRegistry.sr9` | PASS | 54.795 |
-| `lib/Dex.sr9` | PASS | 180.460 |
-| `proofs/InvariantObservers.sr9` | PASS | 210.685 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 202.062 |
-| `proofs/AttackObservers.sr9` | PASS | 1.162 |
-| `DexActorDemo.sr9` | PASS | 210.238 |
+| `core/src/Principal.sr9` | PASS | 0.278 |
+| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.326 |
+| `lib/Types.sr9` | PASS | 0.285 |
+| `lib/AssetKey.sr9` | PASS | 0.704 |
+| `lib/AssetTotals.sr9` | PASS | 10.538 |
+| `lib/BalanceBook.sr9` | PASS | 19.628 |
+| `lib/LedgerSet.sr9` | PASS | 8.680 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.325 |
+| `lib/PendingWithdrawals.sr9` | PASS | 8.952 |
+| `lib/PendingReturns.sr9` | PASS | 8.857 |
+| `lib/LedgerAccounting.sr9` | PASS | 7.388 |
+| `lib/AmmMath.sr9` | PASS | 0.821 |
+| `lib/Pool.sr9` | PASS | 1.212 |
+| `lib/PoolRegistry.sr9` | PASS | 53.295 |
+| `lib/Dex.sr9` | PASS | 178.063 |
+| `proofs/InvariantObservers.sr9` | PASS | 204.572 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 196.118 |
+| `proofs/AttackObservers.sr9` | PASS | 1.218 |
+| `DexActorDemo.sr9` | PASS | 199.114 |
 
 ## Development Rule
 

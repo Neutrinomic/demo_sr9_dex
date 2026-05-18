@@ -238,6 +238,32 @@
   available while self-framing invariant calls that mention multiple child
   observer facts. Repro command is the same single-file verify command above.
 
+- Strengthening `LedgerAccounting.net` with the exact clamped-subtraction
+  formula verified in the leaf module but broke the full DEX gate through
+  imports. Shape:
+  `ensures result == (if (outflow(accounting, key) >= inflow(accounting, key))
+  0 else inflow(accounting, key) - outflow(accounting, key))`. Direct command:
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/lib/LedgerAccounting.sr9` passed. Full gate:
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1
+  ./scripts/run-op6-dex2-gate.sh` failed in `InvariantObservers.sr9` with
+  imported contract well-formedness errors around insufficient permission to
+  access the nested `LedgerAccounting` owner through `Dex.State`, plus
+  downstream `Dex.ledgerNet` preservation failures. This is a bad ergonomics
+  cliff: a locally valid pure observer summary becomes unusable when imported
+  through a parent opaque owner.
+
+- Trying to make `AssetTotals.list` prove each returned payload matches the map
+  model failed even after OP7 listing improvements. Shape: add an `entryMatches`
+  ghost observer and a `forall i < Array.size(result)` postcondition over
+  entries produced by `BMap.entries`. Command:
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/lib/AssetTotals.sr9`. Failure:
+  postcondition of `AssetTotals$list` might not hold; the iterator path does
+  not retain enough exact model facts for the returned key/value payloads.
+  Workaround remains owner-maintained key logs plus authoritative re-reads in
+  modules that need list contracts.
+
 - Switching `AssetTotals` from `MBMap` to pure `BMap` avoids the nested child
   projection failures but exposes an owner-transaction refold problem on mutable
   opaque fields. Shape: `AssetTotals = opaque { var totals :
@@ -1416,3 +1442,15 @@
   `closedLoopNoProfitDepth5` and `publicActionClosedLoopNoProfitDepth5`.
   Direct verification passed with
   `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 4 --verify playground/invar/dex2/proofs/AttackObservers.sr9`.
+
+- Post-OP7 attack-observer improvement on 2026-05-18: extended the same
+  public-action closed-loop no-profit shape through depth 6 with
+  `closedLoopNoProfitDepth6` and `publicActionClosedLoopNoProfitDepth6`.
+  Direct verification passed with
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores 4 --verify playground/invar/dex2/proofs/AttackObservers.sr9`.
+  Full DEX2 gate also passed:
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.YekuVA`; the slowest
+  `verify.pipeline_viper_files` entries were `InvariantObservers.sr9`
+  204.572s, `DexActorDemo.sr9` 199.114s,
+  `LedgerRoundTripObservers.sr9` 196.118s, and `Dex.sr9` 178.063s.
