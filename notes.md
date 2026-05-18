@@ -1486,3 +1486,50 @@
   `verify.pipeline_viper_files` entries were `DexActorDemo.sr9` 209.750s,
   `InvariantObservers.sr9` 205.550s, `LedgerRoundTripObservers.sr9` 196.356s,
   and `Dex.sr9` 175.340s.
+
+- Dust-retirement implementation note on 2026-05-18: a first attempt made
+  `BalanceBook.abandonDust` return `?Nat` with a branch postcondition proving
+  `total(book, key) + amount == old(total(book, key))`. The leaf verified, but
+  `Dex.abandonDust` could not use that exact state delta after matching the
+  option result. Repro: call `BalanceBook.abandonDust`, match `case (?amount)`,
+  then assert the exported total-delta in `Dex.sr9`; run
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/lib/Dex.sr9`. Current workaround: precheck
+  the exact caller balance and use `BalanceBook.debitKnown`, a straight-line
+  debit helper whose postconditions export the needed exact decrement.
+
+- Lowering issue hit during the same work: `return` inside a `switch` used as an
+  expression failed translation with "break in expression context". Repro shape:
+  `let x = switch (option) { case null { return err }; case (?v) { v } };` in
+  `Dex.abandonDust`. Statement-level control flow or a switch expression without
+  inner `return` avoids the failure.
+
+- Dust-retirement proof limitation: the runtime transition debits the user's
+  `BalanceBook` balance and then credits the per-ledger `abandonedDust`
+  `AssetTotals`, but the current verifier loses exact facts across those two
+  opaque child calls. In particular, after `AssetTotals.credit`, a previously
+  proved `localBalance(...) == 0` fact is no longer available, and old-state
+  wrapper facts such as `old(localObligation(...)) ==
+  old(BalanceBook.total(...)) + old(PoolRegistry.reserveTotal(...))` do not lift
+  cleanly. The verified `Dex.abandonDust` surface therefore currently proves the
+  receipt fields and tracked dust total, while the stronger state-level
+  conservation observer for this transition is postponed. Repro command:
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/lib/Dex.sr9` after adding both exact
+  local-balance and old-local-obligation postconditions to `Dex.abandonDust`.
+
+- Tried converting `LedgerSet.status/info/isListed/isActive/isRetiring/cachedFee`
+  to `pure` helpers so read-only ledger guards would not obscure unrelated DEX
+  balance facts. `LedgerSet.sr9` verified directly, but importing through
+  `Dex.sr9` failed with "abstract predicates cannot be unfolded" at the
+  `BMap.get` inside `LedgerSet.status`. This matches the existing private
+  opaque-field pure-import limitation. The change was reverted; the safer local
+  workaround was to keep `LedgerSet` queries effectful and avoid claiming the
+  blocked old-state facts on `Dex.abandonDust`.
+
+- Full dust-retirement gate passed on 2026-05-18 with
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.5v38Iy`; the slowest
+  `verify.pipeline_viper_files` entries were `DexActorDemo.sr9` 235.575s,
+  `InvariantObservers.sr9` 222.865s, `LedgerRoundTripObservers.sr9` 207.421s,
+  and `Dex.sr9` 183.818s.

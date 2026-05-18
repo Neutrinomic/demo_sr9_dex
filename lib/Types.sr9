@@ -152,6 +152,15 @@ module {
     remainingLocalBalance : Nat
   };
 
+  public type DustAbandonReceipt = {
+    ledger : Principal;
+    user : Principal;
+    balanceKey : Text;
+    abandonedAmount : Nat;
+    fee : Nat;
+    abandonedDustTotal : Nat
+  };
+
   public type DepositError = {
     #ledgerNotActive : Principal;
     #zeroAmount;
@@ -216,9 +225,19 @@ module {
     #ledgerNotRetiring : Principal;
     #ledgerHasPools : Principal;
     #ledgerHasPendingOps : Principal;
+    #onlyDustBalances : { remainingLocalBalance : Nat; fee : Nat };
     #returnBalanceDoesNotCoverFee : { balance : Nat; fee : Nat };
     #ledgerTransferErr : ICRCLedger.TransferError;
     #ledgerTransferRejected : LedgerReject
+  };
+
+  public type DustAbandonError = {
+    #ledgerNotWhitelisted : Principal;
+    #ledgerNotRetiring : Principal;
+    #ledgerHasPools : Principal;
+    #ledgerHasPendingOps : Principal;
+    #noLocalBalance;
+    #balanceExceedsFee : { balance : Nat; fee : Nat }
   };
 
   public type ControllerLedgerError = {

@@ -16,6 +16,7 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   `liquidity`, `balances`, `pools`.
 - [x] Controller funcs are wired: `controller_ledger`, `createPool`,
   `removePool`, `returnLedgerBalances`.
+- [x] User-consented retiring-ledger dust cleanup is wired as `abandonDust`.
 - [x] External ledgers are built from `ICRCLedger.fromPrincipal`.
 - [x] Deposit credits local balance only after `icrc2_transfer_from` returns
   `#Ok`.
@@ -284,7 +285,7 @@ proof changes because DEX2 remains a heavy protocol-scale file.
 - [x] `Dex` exposes local transitions for deposit, withdraw, return balances,
   swap, liquidity, pool creation/removal, and ledger lifecycle.
 - [x] `accountingBalanced` helper exists:
-  `ledgerNet == localObligation + pendingOut`.
+  `ledgerNet == localObligation + pendingOut + abandonedDust`.
 - [x] `lpSupplyBalanced` helper exists:
   pool total shares equal user LP balances plus locked shares.
 - [ ] Turn accounting conservation into a strong invariant or into transition
@@ -309,8 +310,11 @@ proof changes because DEX2 remains a heavy protocol-scale file.
 - [x] Strengthen ledger lifecycle transitions so `controllerAddLedger`,
   `controllerRetireLedger`, and `controllerRemoveLedger` preserve direct local
   totals, local obligation, pending-out, and ledger net for the touched ledger.
-  Observer wrappers verify for add and retire; the remove wrapper import is
-  blocked and documented in `notes.md`, while the DEX contract itself verifies.
+  Observer wrappers verify for add, retire, and final remove.
+- [x] Add retiring-ledger dust cleanup with explicit user consent. Successful
+  `Dex.abandonDust` receipts prove the caller, ledger, fee bound, and tracked
+  `abandonedDust` total. Stronger old-state local-obligation conservation for
+  that transition is recorded in `notes.md` as a verifier limitation.
 - [x] Strengthen successful liquidity postconditions with exact caller
   pool-share virtual balance deltas when the pool-share record key is distinct
   from the real-ledger record keys.
@@ -369,12 +373,15 @@ proof changes because DEX2 remains a heavy protocol-scale file.
   `pendingOut` is unchanged.
 - [x] Prove successful deposit preserves the full accounting balance equation
   when the ledger starts settled:
-  `ledgerNet == localObligation + pendingOut` remains true.
+  `ledgerNet == localObligation + pendingOut + abandonedDust` remains true.
 - [x] Add state-level observers over real `Dex` transitions for conservation:
   `finishDepositOk` preserves the equation for settled ledgers, deposit
   precheck and failed deposit cleanup preserve it unchanged, and quote plus
   add/retire/remove ledger lifecycle transitions preserve it for touched
   ledgers.
+- [x] Add receipt/dust tracking observer for `Dex.abandonDust`; full old-state
+  conservation for that transition remains blocked by the cross-opaque-child
+  fact loss documented in `notes.md`.
 - [x] Added verified accounting-conservation arithmetic kernels for unchanged
   deltas, deposit deltas, moving local balance into pending withdrawals,
   settling pending withdrawals, refunding pending withdrawals/returns, and

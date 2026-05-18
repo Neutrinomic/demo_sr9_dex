@@ -118,6 +118,18 @@ module {
     Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0) > 0
   };
 
+  public ghost func holderAbove(
+    book : BalanceBook,
+    key : Text,
+    user : Principal,
+    amount : Nat
+  ) : Bool
+    requires true;
+    ensures result == (Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0) > amount);
+  {
+    Map.getOr<Text, Nat>(model(book), recordKey(user, key), 0) > amount
+  };
+
   public func credit(book : BalanceBook, user : Principal, key : Text, amount : Nat) : ()
     requires true;
     ensures total(book, key) == old(total(book, key)) + amount;
@@ -172,6 +184,30 @@ module {
     assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
     book.totals := put(book.totals, key, previousTotal - amount);
     true
+  };
+
+  public func debitKnown(book : BalanceBook, user : Principal, key : Text, amount : Nat) : ()
+    requires get(book, user, key) >= amount;
+    requires total(book, key) >= amount;
+    ensures get(book, user, key) + amount == old(get(book, user, key));
+    ensures total(book, key) + amount == old(total(book, key));
+    ensures forall<Text>(pure func (otherRecordKey : Text) : Bool =
+      otherRecordKey != recordKey(user, key) ==>
+        Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
+        old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
+  {
+    if (amount == 0) {
+      return
+    };
+    let balanceKey = recordKey(user, key);
+    let previous = mapGet(book.balances, balanceKey);
+    let previousTotal = mapGet(book.totals, key);
+    assert previous >= amount;
+    assert previousTotal >= amount;
+    assert BMap.orderedBy<Text, Nat>(book.balances, Text.compare);
+    book.balances := put(book.balances, balanceKey, previous - amount);
+    assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
+    book.totals := put(book.totals, key, previousTotal - amount)
   };
 
   public func balances(book : BalanceBook, user : Principal) : [BalanceEntry]
@@ -261,6 +297,43 @@ module {
       loop:invariant book.seen == old(book.seen);
       let user = holderList[i];
       if (user != controller and mapGet(book.balances, recordKey(user, key)) > 0) {
+        return ?user
+      };
+      i += 1
+    };
+    null
+  };
+
+  public func firstNonControllerHolderAbove(
+    book : BalanceBook,
+    key : Text,
+    controller : Principal,
+    amount : Nat
+  ) : ?Principal
+    requires true;
+    ensures model(book) == old(model(book));
+    ensures totalModel(book) == old(totalModel(book));
+    ensures switch (result) {
+      case null { true };
+      case (?user) {
+        user != controller and
+        holderMatches(book, key, user) and
+        holderAbove(book, key, user, amount)
+      }
+    };
+  {
+    let holderList = holders(book, key);
+    var i = 0;
+    while (i < holderList.size()) {
+      loop:invariant i <= holderList.size();
+      loop:invariant book.balances == old(book.balances);
+      loop:invariant book.totals == old(book.totals);
+      loop:invariant book.seen == old(book.seen);
+      let user = holderList[i];
+      let balance = mapGet(book.balances, recordKey(user, key));
+      if (user != controller and balance > amount) {
+        assert holderMatches(book, key, user);
+        assert holderAbove(book, key, user, amount);
         return ?user
       };
       i += 1

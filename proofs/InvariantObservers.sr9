@@ -56,18 +56,24 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let receipt = Dex.deposit(dex, caller, ledger, amount, txIndex);
     assert Dex.ledgerNet(dex, ledger) == beforeNet + amount;
     assert Dex.localObligation(dex, ledger) == beforeObligation + amount;
     assert Dex.pendingOut(dex, ledger) == beforePending;
-    NatAxiom.addAssoc(beforeObligation, beforePending, amount);
-    NatAxiom.addComm(beforePending, amount);
-    NatAxiom.addAssoc(beforeObligation, amount, beforePending);
-    assert (beforeObligation + beforePending) + amount ==
-      (beforeObligation + amount) + beforePending;
-    assert Dex.ledgerNet(dex, ledger) ==
-      Dex.localObligation(dex, ledger) + Dex.pendingOut(dex, ledger);
+    assert Dex.abandonedDust(dex, ledger) == beforeDust;
+    depositDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      beforeDust,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger),
+      amount
+    );
     receipt
   };
 
@@ -93,18 +99,22 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.finishDepositOk(dex, caller, ledger, amount, txIndex);
     assert Dex.ledgerNet(dex, ledger) == beforeNet + amount;
     assert Dex.localObligation(dex, ledger) == beforeObligation + amount;
     assert Dex.pendingOut(dex, ledger) == beforePending;
+    assert Dex.abandonedDust(dex, ledger) == beforeDust;
     depositDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
       Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger),
       amount
     );
     assert Dex.accountingBalanced(dex, ledger);
@@ -122,15 +132,18 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.beginDeposit(dex, ledger, amount);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
@@ -140,40 +153,83 @@ module {
     oldNet : Nat,
     oldObligation : Nat,
     oldPending : Nat,
+    oldDust : Nat,
     newNet : Nat,
     newObligation : Nat,
-    newPending : Nat
+    newPending : Nat,
+    newDust : Nat
   ) : ()
-    requires oldNet == oldObligation + oldPending;
+    requires oldNet == oldObligation + oldPending + oldDust;
     requires newNet == oldNet;
     requires newObligation == oldObligation;
     requires newPending == oldPending;
-    ensures newNet == newObligation + newPending;
+    requires newDust == oldDust;
+    ensures newNet == newObligation + newPending + newDust;
   {
-    assert newNet == newObligation + newPending
+    assert newNet == newObligation + newPending + newDust
   };
 
   public func depositDeltasPreserveAccountingBalance(
     oldNet : Nat,
     oldObligation : Nat,
     oldPending : Nat,
+    oldDust : Nat,
     newNet : Nat,
     newObligation : Nat,
     newPending : Nat,
+    newDust : Nat,
     amount : Nat
   ) : ()
-    requires oldNet == oldObligation + oldPending;
+    requires oldNet == oldObligation + oldPending + oldDust;
     requires newNet == oldNet + amount;
     requires newObligation == oldObligation + amount;
     requires newPending == oldPending;
-    ensures newNet == newObligation + newPending;
+    requires newDust == oldDust;
+    ensures newNet == newObligation + newPending + newDust;
   {
+    NatAxiom.addAssoc(oldObligation + oldPending, oldDust, amount);
+    NatAxiom.addComm(oldDust, amount);
+    NatAxiom.addAssoc(oldObligation + oldPending, amount, oldDust);
     NatAxiom.addAssoc(oldObligation, oldPending, amount);
     NatAxiom.addComm(oldPending, amount);
     NatAxiom.addAssoc(oldObligation, amount, oldPending);
     assert (oldObligation + oldPending) + amount ==
       (oldObligation + amount) + oldPending;
-    assert newNet == newObligation + newPending
+    assert ((oldObligation + oldPending) + oldDust) + amount ==
+      ((oldObligation + amount) + oldPending) + oldDust;
+    assert newNet == newObligation + newPending + newDust
+  };
+
+  public func abandonDustDeltasPreserveAccountingBalance(
+    oldNet : Nat,
+    oldObligation : Nat,
+    oldPending : Nat,
+    oldDust : Nat,
+    newNet : Nat,
+    newObligation : Nat,
+    newPending : Nat,
+    newDust : Nat,
+    amount : Nat
+  ) : ()
+    requires oldNet == oldObligation + oldPending + oldDust;
+    requires newNet == oldNet;
+    requires oldObligation == newObligation + amount;
+    requires newPending == oldPending;
+    requires newDust == oldDust + amount;
+    ensures newNet == newObligation + newPending + newDust;
+  {
+    assert oldNet == (newObligation + amount) + oldPending + oldDust;
+    NatAxiom.addAssoc(newObligation, amount, oldPending);
+    NatAxiom.addComm(amount, oldPending);
+    NatAxiom.addAssoc(newObligation, oldPending, amount);
+    assert (newObligation + amount) + oldPending ==
+      (newObligation + oldPending) + amount;
+    NatAxiom.addAssoc(newObligation + oldPending, amount, oldDust);
+    NatAxiom.addComm(amount, oldDust);
+    NatAxiom.addAssoc(newObligation + oldPending, oldDust, amount);
+    assert ((newObligation + oldPending) + amount) + oldDust ==
+      (newObligation + oldPending) + (oldDust + amount);
+    assert newNet == newObligation + newPending + newDust
   };
 
   public func moveLocalToPendingPreservesAccountingBalance(
@@ -344,23 +400,28 @@ module {
     oldNet : Nat,
     oldObligation : Nat,
     oldPending : Nat,
+    oldDust : Nat,
     newNet : Nat,
     newObligation : Nat,
-    newPending : Nat
+    newPending : Nat,
+    newDust : Nat
   ) : ()
-    requires oldNet == oldObligation + oldPending;
+    requires oldNet == oldObligation + oldPending + oldDust;
     requires newNet == oldNet;
     requires newObligation == oldObligation;
     requires newPending == oldPending;
-    ensures newNet == newObligation + newPending;
+    requires newDust == oldDust;
+    ensures newNet == newObligation + newPending + newDust;
   {
     unchangedDeltasPreserveAccountingBalance(
       oldNet,
       oldObligation,
       oldPending,
+      oldDust,
       newNet,
       newObligation,
-      newPending
+      newPending,
+      newDust
     )
   };
 
@@ -415,15 +476,18 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.finishDepositErr(dex, ledger, err);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
@@ -463,15 +527,18 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.finishDepositReject(dex, ledger, reject);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
@@ -505,15 +572,18 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.controllerAddLedger(dex, caller, ledger, fee);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
@@ -545,15 +615,18 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.controllerRetireLedger(dex, caller, ledger);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
@@ -570,18 +643,43 @@ module {
     let beforeNet = Dex.ledgerNet(dex, ledger);
     let beforeObligation = Dex.localObligation(dex, ledger);
     let beforePending = Dex.pendingOut(dex, ledger);
-    assert beforeNet == beforeObligation + beforePending;
+    let beforeDust = Dex.abandonedDust(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending + beforeDust;
     let out = Dex.controllerRemoveLedger(dex, caller, ledger);
     unchangedDeltasPreserveAccountingBalance(
       beforeNet,
       beforeObligation,
       beforePending,
+      beforeDust,
       Dex.ledgerNet(dex, ledger),
       Dex.localObligation(dex, ledger),
-      Dex.pendingOut(dex, ledger)
+      Dex.pendingOut(dex, ledger),
+      Dex.abandonedDust(dex, ledger)
     );
     assert Dex.accountingBalanced(dex, ledger);
     out
+  };
+
+  public func abandonDustReceiptFacts(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<Types.DustAbandonReceipt, Types.DustAbandonError>
+    requires true;
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.user == caller and
+        receipt.balanceKey == AssetKey.ledger(ledger) and
+        receipt.abandonedAmount > 0 and
+        receipt.abandonedAmount <= receipt.fee and
+        receipt.abandonedDustTotal == Dex.abandonedDust(dex, ledger) and
+        receipt.abandonedDustTotal >= receipt.abandonedAmount
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.abandonDust(dex, caller, ledger)
   };
 
   public func createPoolMarksLedgersAsHavingPool(
@@ -709,27 +807,33 @@ module {
     let beforeNetIn = Dex.ledgerNet(dex, ledgerIn);
     let beforeObligationIn = Dex.localObligation(dex, ledgerIn);
     let beforePendingIn = Dex.pendingOut(dex, ledgerIn);
+    let beforeDustIn = Dex.abandonedDust(dex, ledgerIn);
     let beforeNetOut = Dex.ledgerNet(dex, ledgerOut);
     let beforeObligationOut = Dex.localObligation(dex, ledgerOut);
     let beforePendingOut = Dex.pendingOut(dex, ledgerOut);
-    assert beforeNetIn == beforeObligationIn + beforePendingIn;
-    assert beforeNetOut == beforeObligationOut + beforePendingOut;
+    let beforeDustOut = Dex.abandonedDust(dex, ledgerOut);
+    assert beforeNetIn == beforeObligationIn + beforePendingIn + beforeDustIn;
+    assert beforeNetOut == beforeObligationOut + beforePendingOut + beforeDustOut;
     let out = Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut);
     unchangedDeltasPreserveAccountingBalance(
       beforeNetIn,
       beforeObligationIn,
       beforePendingIn,
+      beforeDustIn,
       Dex.ledgerNet(dex, ledgerIn),
       Dex.localObligation(dex, ledgerIn),
-      Dex.pendingOut(dex, ledgerIn)
+      Dex.pendingOut(dex, ledgerIn),
+      Dex.abandonedDust(dex, ledgerIn)
     );
     unchangedDeltasPreserveAccountingBalance(
       beforeNetOut,
       beforeObligationOut,
       beforePendingOut,
+      beforeDustOut,
       Dex.ledgerNet(dex, ledgerOut),
       Dex.localObligation(dex, ledgerOut),
-      Dex.pendingOut(dex, ledgerOut)
+      Dex.pendingOut(dex, ledgerOut),
+      Dex.abandonedDust(dex, ledgerOut)
     );
     assert Dex.accountingBalanced(dex, ledgerIn);
     assert Dex.accountingBalanced(dex, ledgerOut);

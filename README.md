@@ -18,7 +18,7 @@ As of the latest full DEX2 gate on 2026-05-18:
 - The latest proof upgrade moves more conservation checking onto real `Dex`
   transitions: successful deposits, deposit prechecks, failed deposit cleanup,
   quote, and ledger add/retire/final-remove now have state-level observers for
-  `ledgerNet == localObligation + pendingOut`.
+  `ledgerNet == localObligation + pendingOut + abandonedDust`.
 - Swap and liquidity proofs cover ledger-net preservation, receipt equations,
   LP-share movement facts, and bounded closed-loop no-profit kernels. Some
   broader aggregate state-level conservation goals remain tracked as future
@@ -53,6 +53,9 @@ are checked as part of the normal development workflow.
   run forced returns that move a user's full local balance into pending state,
   send the withdrawable amount back through the external ledger, and restore the
   exact local balance if the ledger call fails or rejects.
+- User-consented dust cleanup: if a retiring-ledger local balance is at or below
+  the cached transfer fee, the user can explicitly abandon it. The DEX tracks
+  that amount as abandoned dust instead of hiding it in the accounting.
 - LP settlement on pool removal: pool deletion must succeed before user-held
   virtual LP-share balances are burned into local token balances, so cleanup is
   modeled as a guarded conversion of user claims rather than a silent deletion.
@@ -76,8 +79,9 @@ The current verified surface includes these guarantees:
 
 - Deposits credit a user only after the ledger `transfer_from` returns success.
 - State-level observers prove the real `Dex` deposit path preserves the
-  conservation equation `ledgerNet == localObligation + pendingOut` for a
-  settled ledger, including the actor-facing successful deposit completion.
+  conservation equation `ledgerNet == localObligation + pendingOut +
+  abandonedDust` for a settled ledger, including the actor-facing successful
+  deposit completion.
 - Withdrawals debit local balance before the external ledger call and restore
   the exact pending debit if the ledger returns an error or rejects.
 - Forced ledger returns use pending state and restore the exact pending local
@@ -87,8 +91,8 @@ The current verified surface includes these guarantees:
   `minAmountOut`.
 - Quote and swap receipts expose the same constant-product output formula.
 - Quote and ledger-lifecycle transitions have state-level observer proofs that
-  preserve `ledgerNet == localObligation + pendingOut` for the touched ledgers,
-  including ledger add, retire, and final removal.
+  preserve `ledgerNet == localObligation + pendingOut + abandonedDust` for the
+  touched ledgers, including ledger add, retire, and final removal.
 - Successful swaps cannot drain the output reserve.
 - The 0.3% swap fee is split into platform and LP portions, with exact receipt
   equations for the split: 20% of the fee goes to the controller as platform
@@ -105,6 +109,9 @@ The current verified surface includes these guarantees:
   removal of ledgers are gated by the configured controller/DAO principal.
 - Retiring ledgers reject final removal while pools, local balances, pending
   withdrawals, pending returns, or in-flight deposits still exist.
+- Forced retirement returns skip balances that cannot pay the cached transfer
+  fee and report the remaining dust total; users must explicitly abandon that
+  dust before final ledger removal can complete.
 - Pool removal converts user LP positions back into local token balances before
   deleting the pool.
 - Balance totals are cached and checked through module contracts.
@@ -154,9 +161,13 @@ The following are known reasons this is still a demo:
 
 - The DEX trusts whitelisted external ledgers to behave like standard truthful
   ICRC ledgers.
-- Dust balances can block retiring-ledger cleanup.
+- Retiring-ledger dust cleanup requires explicit user action; abandoned dust is
+  tracked, but the full state-level old-obligation proof for that new cleanup
+  transition remains future verifier work.
 - Locked-liquidity shutdown policy is still a protocol-design choice.
-- Outbound duplicate-transfer semantics need a clearer production policy.
+- Outbound duplicate-transfer semantics are a whitelist contract in this demo:
+  allowed ledgers must not report ambiguous `#Duplicate` results for these
+  non-idempotent outbound calls.
 - Upgrade and external-ledger reconciliation procedures are not productionized.
 
 These are protocol and verifier-workflow items to resolve before treating this
@@ -194,25 +205,25 @@ target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `core/src/Principal.sr9` | PASS | 0.277 |
-| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.326 |
-| `lib/Types.sr9` | PASS | 0.286 |
-| `lib/AssetKey.sr9` | PASS | 0.694 |
-| `lib/AssetTotals.sr9` | PASS | 10.742 |
-| `lib/BalanceBook.sr9` | PASS | 19.973 |
-| `lib/LedgerSet.sr9` | PASS | 8.786 |
-| `lib/InFlightDeposits.sr9` | PASS | 7.399 |
-| `lib/PendingWithdrawals.sr9` | PASS | 9.088 |
-| `lib/PendingReturns.sr9` | PASS | 9.024 |
-| `lib/LedgerAccounting.sr9` | PASS | 7.474 |
-| `lib/AmmMath.sr9` | PASS | 0.873 |
-| `lib/Pool.sr9` | PASS | 1.207 |
-| `lib/PoolRegistry.sr9` | PASS | 53.322 |
-| `lib/Dex.sr9` | PASS | 175.340 |
-| `proofs/InvariantObservers.sr9` | PASS | 205.550 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 196.356 |
-| `proofs/AttackObservers.sr9` | PASS | 1.196 |
-| `DexActorDemo.sr9` | PASS | 209.750 |
+| `core/src/Principal.sr9` | PASS | 0.280 |
+| `core/src/pattern/ICRCLedger.sr9` | PASS | 0.328 |
+| `lib/Types.sr9` | PASS | 0.294 |
+| `lib/AssetKey.sr9` | PASS | 0.723 |
+| `lib/AssetTotals.sr9` | PASS | 11.094 |
+| `lib/BalanceBook.sr9` | PASS | 20.952 |
+| `lib/LedgerSet.sr9` | PASS | 9.240 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.796 |
+| `lib/PendingWithdrawals.sr9` | PASS | 9.613 |
+| `lib/PendingReturns.sr9` | PASS | 9.840 |
+| `lib/LedgerAccounting.sr9` | PASS | 8.325 |
+| `lib/AmmMath.sr9` | PASS | 0.945 |
+| `lib/Pool.sr9` | PASS | 1.376 |
+| `lib/PoolRegistry.sr9` | PASS | 56.395 |
+| `lib/Dex.sr9` | PASS | 183.818 |
+| `proofs/InvariantObservers.sr9` | PASS | 222.865 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 207.421 |
+| `proofs/AttackObservers.sr9` | PASS | 1.252 |
+| `DexActorDemo.sr9` | PASS | 235.575 |
 
 ## Development Rule
 

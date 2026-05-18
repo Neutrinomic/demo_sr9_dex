@@ -1,4 +1,5 @@
 import AssetKey "./AssetKey";
+import AssetTotals "./AssetTotals";
 import AmmMath "./AmmMath";
 import BalanceBook "./BalanceBook";
 import BSeq "mo:core/pure/BSeq";
@@ -23,6 +24,7 @@ module {
     balances : BalanceBook.BalanceBook;
     pools : PoolRegistry.PoolRegistry;
     accounting : LedgerAccounting.LedgerAccounting;
+    abandonedDust : AssetTotals.AssetTotals;
     pendingWithdrawals : PendingWithdrawals.PendingWithdrawals;
     pendingReturns : PendingReturns.PendingReturns;
     inFlightDeposits : InFlightDeposits.InFlightDeposits
@@ -53,6 +55,7 @@ module {
       balances = BalanceBook.empty();
       pools = PoolRegistry.empty();
       accounting = LedgerAccounting.empty();
+      abandonedDust = AssetTotals.empty();
       pendingWithdrawals = PendingWithdrawals.empty();
       pendingReturns = PendingReturns.empty();
       inFlightDeposits = InFlightDeposits.empty()
@@ -146,6 +149,14 @@ module {
     PendingReturns.total(dex.pendingReturns, key)
   };
 
+  public pure func abandonedDust(dex : State, ledger : Principal) : Nat
+    requires true;
+    ensures result >= 0;
+    ensures result == AssetTotals.get(dex.abandonedDust, AssetKey.ledger(ledger));
+  {
+    AssetTotals.get(dex.abandonedDust, AssetKey.ledger(ledger))
+  };
+
   public inline pure func pendingWithdrawalDebit(dex : State, user : Principal, ledgerKey : Text) : Nat
     requires true;
     ensures result == PendingWithdrawals.pendingDebit(dex.pendingWithdrawals, user, ledgerKey);
@@ -162,9 +173,13 @@ module {
 
   public pure func accountingBalanced(dex : State, ledger : Principal) : Bool
     requires true;
-    ensures result == (ledgerNet(dex, ledger) == localObligation(dex, ledger) + pendingOut(dex, ledger));
+    ensures result == (
+      ledgerNet(dex, ledger) ==
+        localObligation(dex, ledger) + pendingOut(dex, ledger) + abandonedDust(dex, ledger)
+    );
   {
-    ledgerNet(dex, ledger) == localObligation(dex, ledger) + pendingOut(dex, ledger)
+    ledgerNet(dex, ledger) ==
+      localObligation(dex, ledger) + pendingOut(dex, ledger) + abandonedDust(dex, ledger)
   };
 
   public pure func lpSupplyBalanced(dex : State, ledgerA : Principal, ledgerB : Principal) : Bool
@@ -212,6 +227,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     switch (err) {
@@ -232,6 +248,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     switch (err) {
@@ -252,6 +269,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     if (caller != dex.controller) {
@@ -275,6 +293,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     if (caller != dex.controller) {
@@ -293,6 +312,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     if (caller != dex.controller) {
@@ -311,6 +331,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
     ensures switch (result) {
       case (#ok(_)) { not ledgerHasPool(dex, ledger) };
@@ -475,6 +496,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     if (amount == 0) {
@@ -507,6 +529,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger)) + amount;
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger)) + amount;
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
   {
     let key = AssetKey.ledger(ledger);
     BalanceBook.credit(dex.balances, caller, key, amount);
@@ -542,7 +565,8 @@ module {
           old(localBalance(dex, caller, AssetKey.ledger(ledger))) + amount and
         localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger)) + amount and
         localObligation(dex, ledger) == old(localObligation(dex, ledger)) + amount and
-        pendingOut(dex, ledger) == old(pendingOut(dex, ledger))
+        pendingOut(dex, ledger) == old(pendingOut(dex, ledger)) and
+        abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger))
       };
       case (#err(_)) { false }
     };
@@ -565,6 +589,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     InFlightDeposits.end(dex.inFlightDeposits, AssetKey.ledger(ledger));
@@ -586,6 +611,7 @@ module {
     ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
     ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
     ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures abandonedDust(dex, ledger) == old(abandonedDust(dex, ledger));
     ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
   {
     InFlightDeposits.end(dex.inFlightDeposits, AssetKey.ledger(ledger));
@@ -796,9 +822,18 @@ module {
     ) {
       return #err(#ledgerHasPendingOps ledger)
     };
-    let userOpt = BalanceBook.firstNonControllerHolder(dex.balances, key, dex.controller);
+    var fee = 0;
+    switch (LedgerSet.cachedFee(dex.ledgers, ledger)) {
+      case null { return #err(#ledgerNotWhitelisted ledger) };
+      case (?value) { fee := value }
+    };
+    let userOpt = BalanceBook.firstNonControllerHolderAbove(dex.balances, key, dex.controller, fee);
     switch (userOpt) {
       case null {
+        let remaining = BalanceBook.total(dex.balances, key);
+        if (remaining > 0) {
+          return #err(#onlyDustBalances({ remainingLocalBalance = remaining; fee = fee }))
+        };
         #ok(#none({
           ledger = ledger;
           returnedUsers = 0;
@@ -807,15 +842,10 @@ module {
           fee = 0;
           returnedAmount = 0;
           txIndex = null;
-          remainingLocalBalance = BalanceBook.total(dex.balances, key)
+          remainingLocalBalance = remaining
         }))
       };
       case (?user) {
-        var fee = 0;
-        switch (LedgerSet.cachedFee(dex.ledgers, ledger)) {
-          case null { return #err(#ledgerNotWhitelisted ledger) };
-          case (?value) { fee := value }
-        };
         let localBalance = BalanceBook.get(dex.balances, user, key);
         if (localBalance <= fee) {
           return #err(#returnBalanceDoesNotCoverFee({ balance = localBalance; fee = fee }))
@@ -841,6 +871,91 @@ module {
         }))
       }
     }
+  };
+
+  public func abandonDust(
+    dex : State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<Types.DustAbandonReceipt, Types.DustAbandonError>
+    requires true;
+    ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.user == caller and
+        receipt.balanceKey == AssetKey.ledger(ledger) and
+        receipt.abandonedAmount > 0 and
+        receipt.abandonedAmount <= receipt.fee and
+        receipt.abandonedDustTotal == abandonedDust(dex, ledger) and
+        receipt.abandonedDustTotal >= receipt.abandonedAmount
+      };
+      case (#err(_)) { true }
+    };
+  {
+    let key = AssetKey.ledger(ledger);
+    assert key == AssetKey.ledger(ledger);
+    if (not LedgerSet.isListed(dex.ledgers, ledger)) {
+      return #err(#ledgerNotWhitelisted ledger)
+    };
+    if (not LedgerSet.isRetiring(dex.ledgers, ledger)) {
+      return #err(#ledgerNotRetiring ledger)
+    };
+    if (PoolRegistry.containsLedger(dex.pools, ledger)) {
+      return #err(#ledgerHasPools ledger)
+    };
+    if (
+      PendingWithdrawals.hasLedger(dex.pendingWithdrawals, key) or
+      PendingReturns.hasLedger(dex.pendingReturns, key) or
+      InFlightDeposits.hasLedger(dex.inFlightDeposits, key)
+    ) {
+      return #err(#ledgerHasPendingOps ledger)
+    };
+    var fee = 0;
+    switch (LedgerSet.cachedFee(dex.ledgers, ledger)) {
+      case null {
+        return #err(#ledgerNotWhitelisted ledger)
+      };
+      case (?value) { fee := value }
+    };
+    let beforeTotal = BalanceBook.total(dex.balances, key);
+    let abandoned = BalanceBook.get(dex.balances, caller, key);
+    if (abandoned == 0) {
+      return #err(#noLocalBalance)
+    };
+    if (beforeTotal < abandoned) {
+      return #err(#noLocalBalance)
+    };
+    if (abandoned > fee) {
+      return #err(#balanceExceedsFee({ balance = abandoned; fee = fee }))
+    };
+    assert BalanceBook.total(dex.balances, key) == beforeTotal;
+    BalanceBook.debitKnown(dex.balances, caller, key, abandoned);
+    assert abandoned > 0;
+    assert abandoned <= fee;
+    assert BalanceBook.total(dex.balances, key) + abandoned == beforeTotal;
+    assert localBalance(dex, caller, key) == 0;
+    let beforeDust = abandonedDust(dex, ledger);
+    AssetTotals.credit(dex.abandonedDust, key, abandoned);
+    assert abandonedDust(dex, ledger) == beforeDust + abandoned;
+    assert key == AssetKey.ledger(ledger);
+    let dustTotal = abandonedDust(dex, ledger);
+    let receipt = {
+      ledger = ledger;
+      user = caller;
+      balanceKey = key;
+      abandonedAmount = abandoned;
+      fee = fee;
+      abandonedDustTotal = dustTotal
+    };
+    assert receipt.ledger == ledger;
+    assert receipt.user == caller;
+    assert receipt.balanceKey == AssetKey.ledger(ledger);
+    assert receipt.abandonedAmount > 0;
+    assert receipt.abandonedAmount <= receipt.fee;
+    assert receipt.abandonedDustTotal == abandonedDust(dex, ledger);
+    assert receipt.abandonedDustTotal >= receipt.abandonedAmount;
+    #ok(receipt)
   };
 
   public func finishReturnOk(
@@ -977,6 +1092,8 @@ module {
     ensures localObligation(dex, ledgerOut) == old(localObligation(dex, ledgerOut));
     ensures pendingOut(dex, ledgerIn) == old(pendingOut(dex, ledgerIn));
     ensures pendingOut(dex, ledgerOut) == old(pendingOut(dex, ledgerOut));
+    ensures abandonedDust(dex, ledgerIn) == old(abandonedDust(dex, ledgerIn));
+    ensures abandonedDust(dex, ledgerOut) == old(abandonedDust(dex, ledgerOut));
     ensures switch (result) {
       case (#ok receipt) {
         receipt.ledgerIn == ledgerIn and

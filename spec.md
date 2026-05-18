@@ -106,6 +106,10 @@ public shared({ caller }) func removePool(
 public shared({ caller }) func returnLedgerBalances(
   ledger : Principal
 ) : async Result<ReturnLedgerBalancesReceipt, ReturnLedgerBalancesError>
+
+public shared({ caller }) func abandonDust(
+  ledger : Principal
+) : async Result<DustAbandonReceipt, DustAbandonError>
 ```
 
 `controller_ledger`, `createPool`, `removePool`, and `returnLedgerBalances` are
@@ -570,9 +574,9 @@ Fee policy:
   `#err(#returnBalanceDoesNotCoverFee { balance = localBalance; fee = cachedFee })`.
   This avoids a controller-forced cleanup call silently converting a user's
   whole local balance into fees while returning nothing.
-- Dust balances that cannot cover a positive returned amount plus fee are an
-  explicit removal blocker in v1. They need a later, explicit dust policy rather
-  than hidden confiscation in `returnLedgerBalances`.
+- `returnLedgerBalances` skips balances that cannot cover a positive returned
+  amount plus fee and reports `#onlyDustBalances` if only such balances remain.
+  Those balances require explicit user consent through `abandonDust`.
 - The controller should withdraw its own remaining local balance normally. Ledger
   removal still fails until the controller's local balance is also zero.
 
@@ -583,6 +587,14 @@ more than one holder only if its receipt reports per-holder progress precisely.
 If no positive non-controller holder remains, return `#ok` with
 `returnedUsers = 0`, `returnedUser = null`, `localBalance = 0`, `fee = 0`,
 `returnedAmount = 0`, and `txIndex = null`.
+
+`abandonDust(ledger)` is the user-consented cleanup path for uneconomic dust on
+a retiring ledger. It requires the ledger to be whitelisted, retiring, have no
+pools, and have no pending operations. The caller's local balance for that
+ledger must be positive and at or below the cached transfer fee. On success the
+caller receives a `DustAbandonReceipt`; no external ledger transfer is made, and
+the abandoned amount is tracked in the per-ledger `abandonedDust` accounting
+bucket.
 
 For the processed non-controller user with local balance `localBalance > 0`:
 
@@ -1267,6 +1279,15 @@ public type ReturnLedgerBalancesReceipt = {
   remainingLocalBalance : Nat;
 }
 
+public type DustAbandonReceipt = {
+  ledger : Principal;
+  user : Principal;
+  balanceKey : Text;
+  abandonedAmount : Nat;
+  fee : Nat;
+  abandonedDustTotal : Nat;
+}
+
 public type DepositError = {
   #ledgerNotActive : Principal;
   #zeroAmount;
@@ -1332,8 +1353,18 @@ public type ReturnLedgerBalancesError = {
   #ledgerHasPools : Principal;
   #ledgerHasPendingOps : Principal;
   #returnBalanceDoesNotCoverFee : { balance : Nat; fee : Nat };
+  #onlyDustBalances : { remainingLocalBalance : Nat; fee : Nat };
   #ledgerTransferErr : ICRCLedger.TransferError;
   #ledgerTransferRejected : LedgerReject;
+}
+
+public type DustAbandonError = {
+  #ledgerNotWhitelisted : Principal;
+  #ledgerNotRetiring : Principal;
+  #ledgerHasPools : Principal;
+  #ledgerHasPendingOps : Principal;
+  #noLocalBalance;
+  #balanceExceedsFee : { balance : Nat; fee : Nat };
 }
 
 public type ControllerLedgerError = {
@@ -1381,18 +1412,22 @@ localObligation(ledger)
 pendingOut(ledger)
   = PendingWithdrawals.total(pendingWithdrawals, ledgerKey(ledger))
   + PendingReturns.total(pendingReturns, ledgerKey(ledger))
+
+abandonedDust(ledger)
+  = dust users explicitly abandoned during retiring-ledger cleanup
 ```
 
 Core reserve invariant:
 
 ```text
-settledLedgerNet(ledger) == localObligation(ledger) + pendingOut(ledger)
+settledLedgerNet(ledger)
+  == localObligation(ledger) + pendingOut(ledger) + abandonedDust(ledger)
 ```
 
 This is the local proof that all settled tokens recorded as entering the canister
-are accounted for exactly as local balances, pool reserves, or in-flight
-outgoing transfers. Controller fee balances are ordinary local balances and are
-already included in `BalanceBook.total`.
+are accounted for exactly as local balances, pool reserves, in-flight outgoing
+transfers, or explicit user-abandoned dust. Controller fee balances are ordinary
+local balances and are already included in `BalanceBook.total`.
 
 Operation effects:
 
@@ -1414,6 +1449,8 @@ Operation effects:
   `settledLedgerNet` and `localObligation` by exactly the processed user's old
   `localBalance`, where `localBalance == returnedAmount + fee`.
 - A failed forced return restores the exact user local balance before returning.
+- A successful dust abandonment moves a user-consented uneconomic local balance
+  into `abandonedDust` without calling the external ledger.
 - Ledger calls are isolated to the actor branches for `deposit`, `withdraw`,
   `controller_ledger(#add)`, and the controller-only `returnLedgerBalances`
   cleanup path.

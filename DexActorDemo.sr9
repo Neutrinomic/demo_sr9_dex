@@ -29,6 +29,8 @@ persistent actor class DexActorDemo(controller : Principal) {
   public type RemovePoolError = Types.RemovePoolError;
   public type ReturnLedgerBalancesReceipt = Types.ReturnLedgerBalancesReceipt;
   public type ReturnLedgerBalancesError = Types.ReturnLedgerBalancesError;
+  public type DustAbandonReceipt = Types.DustAbandonReceipt;
+  public type DustAbandonError = Types.DustAbandonError;
   public type ControllerLedgerError = Types.ControllerLedgerError;
 
   var dex : Dex.State = Dex.empty(controller);
@@ -410,7 +412,8 @@ persistent actor class DexActorDemo(controller : Principal) {
   };
 
   // Controller-only ledger cleanup path for a retiring ledger after its pools
-  // are gone. One non-controller user's local balance is returned per call.
+  // are gone. One returnable non-controller local balance is returned per call;
+  // dust balances at or below the cached transfer fee require user consent.
   public shared({ caller }) func returnLedgerBalances(
     ledger : Principal
   ) : async Result<ReturnLedgerBalancesReceipt, ReturnLedgerBalancesError>
@@ -454,5 +457,27 @@ persistent actor class DexActorDemo(controller : Principal) {
         }
       }
     }
+  };
+
+  // User-consented cleanup for an uneconomic local balance on a retiring ledger.
+  // No ledger transfer is made; the balance is removed from user obligations and
+  // tracked as abandoned dust so conservation accounting stays explicit.
+  public shared({ caller }) func abandonDust(
+    ledger : Principal
+  ) : async Result<DustAbandonReceipt, DustAbandonError>
+    reads controller
+    modifies dex
+    ensures Dex.controllerOf(dex) == controller;
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.user == caller and
+        receipt.abandonedAmount > 0 and
+        receipt.abandonedAmount <= receipt.fee
+      };
+      case (#err(_)) { true }
+    };
+  {
+    Dex.abandonDust(dex, caller, ledger)
   };
 }

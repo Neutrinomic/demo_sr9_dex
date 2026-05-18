@@ -21,7 +21,7 @@ module {
     BMap.Spec.model<Text, Nat>(ledgers.statuses)
   };
 
-  private pure func key(ledger : Principal) : Text {
+  private pure func ledgerKey(ledger : Principal) : Text {
     Principal.toText(ledger)
   };
 
@@ -56,9 +56,9 @@ module {
   public func status(ledgers : LedgerSet, ledger : Principal) : Status
     requires true;
     ensures model(ledgers) == old(model(ledgers));
-    ensures result != #absent ==> Map.contains<Text, Nat>(key(ledger), model(ledgers));
+    ensures result != #absent ==> Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers));
   {
-    switch (BMap.get<Text, Nat>(ledgers.statuses, Text.compare, key(ledger))) {
+    switch (BMap.get<Text, Nat>(ledgers.statuses, Text.compare, ledgerKey(ledger))) {
       case (?1) { #active };
       case (?2) { #retiring };
       case _ { #absent }
@@ -71,8 +71,8 @@ module {
   {
     switch (status(ledgers, ledger)) {
       case (#absent) { null };
-      case (#active) { ?{ status = #active; fee = mapGet(ledgers.fees, key(ledger)) } };
-      case (#retiring) { ?{ status = #retiring; fee = mapGet(ledgers.fees, key(ledger)) } }
+      case (#active) { ?{ status = #active; fee = mapGet(ledgers.fees, ledgerKey(ledger)) } };
+      case (#retiring) { ?{ status = #retiring; fee = mapGet(ledgers.fees, ledgerKey(ledger)) } }
     }
   };
 
@@ -102,7 +102,7 @@ module {
     ensures model(ledgers) == old(model(ledgers));
   {
     if (isListed(ledgers, ledger)) {
-      ?mapGet(ledgers.fees, key(ledger))
+      ?mapGet(ledgers.fees, ledgerKey(ledger))
     } else {
       null
     }
@@ -110,9 +110,9 @@ module {
 
   private func putStatus(ledgers : LedgerSet, ledger : Principal, status : Types.LedgerStatus) : ()
     requires true;
-    ensures Map.contains<Text, Nat>(key(ledger), model(ledgers));
+    ensures Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers));
   {
-    let k = key(ledger);
+    let k = ledgerKey(ledger);
     assert BMap.orderedBy<Text, Nat>(ledgers.statuses, Text.compare);
     let nextStatuses = BMap.add<Text, Nat>(ledgers.statuses, Text.compare, k, statusNat(status));
     assert BMap.orderedBy<Text, Nat>(nextStatuses, Text.compare);
@@ -123,7 +123,7 @@ module {
     requires true;
     ensures model(ledgers) == old(model(ledgers));
   {
-    let k = key(ledger);
+    let k = ledgerKey(ledger);
     assert BMap.orderedBy<Text, Nat>(ledgers.fees, Text.compare);
     let nextFees = BMap.add<Text, Nat>(ledgers.fees, Text.compare, k, fee);
     assert BMap.orderedBy<Text, Nat>(nextFees, Text.compare);
@@ -132,9 +132,9 @@ module {
 
   private func clear(ledgers : LedgerSet, ledger : Principal) : ()
     requires true;
-    ensures Map.contains<Text, Nat>(key(ledger), model(ledgers));
+    ensures Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers));
   {
-    let k = key(ledger);
+    let k = ledgerKey(ledger);
     assert BMap.orderedBy<Text, Nat>(ledgers.statuses, Text.compare);
     let nextStatuses = BMap.add<Text, Nat>(ledgers.statuses, Text.compare, k, 0);
     assert BMap.orderedBy<Text, Nat>(nextStatuses, Text.compare);
@@ -152,7 +152,7 @@ module {
   ) : Types.Result<(), Types.ControllerLedgerError>
     requires true;
     ensures switch (result) {
-      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#ok(_)) { Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers)) };
       case (#err(_)) { true }
     };
   {
@@ -173,7 +173,7 @@ module {
   ) : Types.Result<(), Types.ControllerLedgerError>
     requires true;
     ensures switch (result) {
-      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#ok(_)) { Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers)) };
       case (#err(_)) { true }
     };
   {
@@ -193,7 +193,7 @@ module {
   ) : Types.Result<(), Types.ControllerLedgerError>
     requires true;
     ensures switch (result) {
-      case (#ok(_)) { Map.contains<Text, Nat>(key(ledger), model(ledgers)) };
+      case (#ok(_)) { Map.contains<Text, Nat>(ledgerKey(ledger), model(ledgers)) };
       case (#err(_)) { true }
     };
   {

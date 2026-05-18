@@ -2,7 +2,7 @@
 
 Date: 2026-05-17
 
-Follow-up update: the original audit found `DexActorDemo` using `transient var dex` and a hard-coded controller. Both have now been changed: state is persistent (`var dex`) and the controller is an actor-class init argument. Targeted verification of `DexActorDemo.sr9` succeeded after the changes.
+Follow-up update: the original audit found `DexActorDemo` using `transient var dex` and a hard-coded controller. Both have now been changed: state is persistent (`var dex`) and the controller is an actor-class init argument. Later follow-up work also removed the previous DEX2 `trusted` source cuts and added explicit user-consented dust cleanup for retiring ledgers.
 
 Inputs:
 - `sub1.md`: ledger boundary, async deposit/withdraw/return, reentrancy, fee and lifecycle handling.
@@ -15,12 +15,11 @@ Verification was not run during this audit pass. Per instruction, the DEX2 files
 
 No subreport found an immediate permissionless theft path for an arbitrary public caller under the intended assumptions: an honest controller, only truthful standard ICRC ledgers whitelisted, and ordinary verified state transitions.
 
-The main risks are production and lifecycle risks, not simple swap arithmetic bugs. The highest concern is that cleanup and operational authority still sit behind trusted or governance-dependent boundaries:
+The main risks are production and lifecycle risks, not simple swap arithmetic bugs. The highest concern is that cleanup and operational authority still sit behind external ledger and governance-dependent boundaries:
 
 - ledger correctness is an external trust assumption;
-- pool removal is trusted, list-driven, and ignores registry deletion failure;
-- dust can permanently block ledger retirement cleanup;
-- locked-liquidity shutdown value currently goes to the controller.
+- pool removal remains governance-sensitive because locked-liquidity shutdown value goes to the controller;
+- dust cleanup now requires explicit user consent and is tracked as abandoned dust.
 
 Before using this actor shape with real funds, treat these as launch blockers unless they are intentionally accepted and documented as governance trust.
 
@@ -117,30 +116,22 @@ Recommendation:
 
 ## Medium Severity
 
-### Dust can permanently block ledger retirement cleanup
+### Retiring-ledger dust requires user action
 
-References: `Dex.sr9:315-317`, `Dex.sr9:616-619`, `Dex.sr9:782-805`.
+References: `Dex.sr9`, `DexActorDemo.sr9`, `spec.md`.
 
-Final ledger removal refuses any remaining local balance. User withdrawals require `amount + fee <= localBalance`, and forced return fails when `localBalance <= fee`. A dust balance can therefore become unwithdrawable and block `controller_ledger(#rem)` forever. Because `returnLedgerBalances` chooses the first non-controller holder, one dust holder can also block forced returns for later larger holders.
+Final ledger removal still refuses any remaining local balance. Forced returns now skip balances at or below the cached transfer fee and report `#onlyDustBalances` when only uneconomic balances remain. Users can call `abandonDust` to explicitly donate that balance into tracked abandoned dust; the controller cannot silently confiscate it through `returnLedgerBalances`.
 
 Recommendation:
-- Add an explicit dust policy before production: controller-subsidized return, user top-up, opt-in burn/donation, or auditable dust escrow/sweep.
-- Add a cursor/skip mechanism so one dust holder does not block cleanup for other holders.
-- Include controller fee balances in cleanup planning, since `returnLedgerBalances` deliberately skips the controller.
+- Decide whether user-consented abandonment is acceptable for production UX, or add top-up/controller-subsidy alternatives.
+- Keep abandoned-dust reporting visible in admin and user interfaces.
+- The full old-state conservation proof for `abandonDust` is not yet claimed; `notes.md` records the verifier limitation.
 
-### Trusted holder/listing cuts are cleanup-critical
+### Holder/listing completeness remains cleanup-critical
 
 References: `BalanceBook.sr9:159-225`, `PoolRegistry.sr9:721-741`, `spec.todo.md:48-53`.
 
-The current trusted count is five:
-
-- `BalanceBook.balances`
-- `BalanceBook.holders`
-- `BalanceBook.firstNonControllerHolder`
-- `PoolRegistry.list`
-- `Dex.removePool`
-
-`holders` and `firstNonControllerHolder` are not just UI helpers. They drive pool settlement and forced returns. If holder enumeration omits a positive LP holder, pool removal can strand or destroy that holder's virtual LP claim. If first-holder lookup misses users, cleanup can stall or report no user while balances remain.
+The previous trusted cuts have been removed, but `holders` and first-holder lookup remain cleanup-critical. They drive pool settlement and forced returns. If holder enumeration omitted a positive LP holder, pool removal could strand or destroy that holder's virtual LP claim. If first-holder lookup missed users, cleanup could stall or report no user while balances remain.
 
 Recommendation:
 - Prove holder completeness and uniqueness properties, or maintain an authoritative per-key holder set.
@@ -180,13 +171,13 @@ Recommendation:
 ## Recommended Fix Order
 
 1. Define explicit state migration/reconciliation for upgrades before any real funds.
-2. Fix `removePool`: do not ignore `deletePool`, define locked-share shutdown ownership, and add exact settlement checks.
-3. Add dust cleanup policy and a forced-return cursor/skip path.
-4. Reduce trusted cleanup cuts, starting with holder completeness for LP settlement.
+2. Define locked-share shutdown ownership and add exact settlement checks around pool removal.
+3. Decide production dust UX around user abandonment, top-up, or subsidy.
+4. Strengthen holder completeness for LP settlement.
 5. Strengthen ledger admission with metadata/root checks and optional external balance reconciliation.
 6. Decide and document outbound duplicate/idempotency semantics.
 7. Expand stateful observers from arithmetic kernels into end-to-end transition properties.
 
 ## Report Disposition
 
-The subreports are consistent: no immediate public-user theft path was identified under the current trust assumptions. The original transient-state and hard-coded-controller issues have been fixed and verified, but the DEX is not ready to be treated as production custody code until pool-removal, dust, ledger-trust, and migration/reconciliation issues are resolved or explicitly accepted.
+The subreports are consistent: no immediate public-user theft path was identified under the current trust assumptions. The original transient-state, hard-coded-controller, trusted-cut, and dust-blocker issues have been improved, but the DEX is not ready to be treated as production custody code until pool-removal policy, dust UX, ledger-trust, and migration/reconciliation issues are resolved or explicitly accepted.
