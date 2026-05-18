@@ -370,6 +370,11 @@ proof changes because DEX2 remains a heavy protocol-scale file.
 - [x] Prove successful deposit preserves the full accounting balance equation
   when the ledger starts settled:
   `ledgerNet == localObligation + pendingOut` remains true.
+- [x] Add state-level observers over real `Dex` transitions for conservation:
+  `finishDepositOk` preserves the equation for settled ledgers, deposit
+  precheck and failed deposit cleanup preserve it unchanged, and quote plus
+  add/retire/remove ledger lifecycle transitions preserve it for touched
+  ledgers.
 - [x] Added verified accounting-conservation arithmetic kernels for unchanged
   deltas, deposit deltas, moving local balance into pending withdrawals,
   settling pending withdrawals, refunding pending withdrawals/returns, and

@@ -1469,3 +1469,20 @@
   ergonomics gap: callers want a simple old-balance sufficiency fact, but the
   verifier does not derive it from the exact additive postcondition or from
   obvious pre-mutation snapshots over the same opaque handle.
+
+- Post-OP7 conservation improvement on 2026-05-18: added state-level observers
+  over real `Dex` transitions that prove the full equation
+  `ledgerNet == localObligation + pendingOut`, not just arithmetic helper
+  kernels. The new observers cover `finishDepositOk` for settled ledgers,
+  `beginDeposit`, failed deposit cleanup (`finishDepositErr` and
+  `finishDepositReject`), controller add/retire/final-remove ledger lifecycle
+  transitions, and `quote` for both touched ledgers. Direct observer
+  verification passed with:
+  `XDG_CACHE_HOME=/tmp/sector9 ./bin/sector9 --package core ./core/src --cores
+  4 --verify playground/invar/dex2/proofs/InvariantObservers.sr9`.
+  Full DEX2 gate also passed:
+  `JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh`.
+  Timing logs were written to `/tmp/op6-dex2-logs.dbXf2C`; the slowest
+  `verify.pipeline_viper_files` entries were `DexActorDemo.sr9` 209.750s,
+  `InvariantObservers.sr9` 205.550s, `LedgerRoundTripObservers.sr9` 196.356s,
+  and `Dex.sr9` 175.340s.

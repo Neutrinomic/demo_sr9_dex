@@ -71,6 +71,71 @@ module {
     receipt
   };
 
+  public func finishDepositOkPreservesAccountingBalanceWhenSettled(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal,
+    amount : Nat,
+    txIndex : Nat
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires Dex.accountingBalanced(dex, ledger);
+    requires Dex.ledgerSettled(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+    ensures switch (result) {
+      case (#ok receipt) {
+        receipt.ledger == ledger and
+        receipt.amount == amount and
+        receipt.txIndex == txIndex
+      };
+      case (#err(_)) { false }
+    };
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.finishDepositOk(dex, caller, ledger, amount, txIndex);
+    assert Dex.ledgerNet(dex, ledger) == beforeNet + amount;
+    assert Dex.localObligation(dex, ledger) == beforeObligation + amount;
+    assert Dex.pendingOut(dex, ledger) == beforePending;
+    depositDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger),
+      amount
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
+  public func beginDepositPreservesAccountingBalance(
+    dex : Dex.State,
+    ledger : Principal,
+    amount : Nat
+  ) : Types.Result<(), Types.DepositError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.beginDeposit(dex, ledger, amount);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
   public func unchangedDeltasPreserveAccountingBalance(
     oldNet : Nat,
     oldObligation : Nat,
@@ -335,6 +400,35 @@ module {
     Dex.finishDepositErr(dex, ledger, err)
   };
 
+  public func failedDepositErrPreservesAccountingBalance(
+    dex : Dex.State,
+    ledger : Principal,
+    err : ICRCLedger.TransferFromError
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.finishDepositErr(dex, ledger, err);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
   public func failedDepositRejectPreservesLocalAccounting(
     dex : Dex.State,
     ledger : Principal,
@@ -354,6 +448,35 @@ module {
     Dex.finishDepositReject(dex, ledger, reject)
   };
 
+  public func failedDepositRejectPreservesAccountingBalance(
+    dex : Dex.State,
+    ledger : Principal,
+    reject : Types.LedgerReject
+  ) : Types.Result<Types.DepositReceipt, Types.DepositError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+    ensures switch (result) {
+      case (#ok(_)) { false };
+      case (#err(_)) { true }
+    };
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.finishDepositReject(dex, ledger, reject);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
   public func controllerAddLedgerPreservesLocalAccounting(
     dex : Dex.State,
     caller : Principal,
@@ -370,6 +493,32 @@ module {
     Dex.controllerAddLedger(dex, caller, ledger, fee)
   };
 
+  public func controllerAddLedgerPreservesAccountingBalance(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal,
+    fee : Nat
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.controllerAddLedger(dex, caller, ledger, fee);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
   public func controllerRetireLedgerPreservesLocalAccounting(
     dex : Dex.State,
     caller : Principal,
@@ -383,6 +532,56 @@ module {
     ensures Dex.ledgerNet(dex, ledger) == old(Dex.ledgerNet(dex, ledger));
   {
     Dex.controllerRetireLedger(dex, caller, ledger)
+  };
+
+  public func controllerRetireLedgerPreservesAccountingBalance(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.controllerRetireLedger(dex, caller, ledger);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
+  };
+
+  public func controllerRemoveLedgerPreservesAccountingBalance(
+    dex : Dex.State,
+    caller : Principal,
+    ledger : Principal
+  ) : Types.Result<(), Types.ControllerLedgerError>
+    requires Dex.accountingBalanced(dex, ledger);
+    ensures Dex.accountingBalanced(dex, ledger);
+  {
+    let beforeNet = Dex.ledgerNet(dex, ledger);
+    let beforeObligation = Dex.localObligation(dex, ledger);
+    let beforePending = Dex.pendingOut(dex, ledger);
+    assert beforeNet == beforeObligation + beforePending;
+    let out = Dex.controllerRemoveLedger(dex, caller, ledger);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNet,
+      beforeObligation,
+      beforePending,
+      Dex.ledgerNet(dex, ledger),
+      Dex.localObligation(dex, ledger),
+      Dex.pendingOut(dex, ledger)
+    );
+    assert Dex.accountingBalanced(dex, ledger);
+    out
   };
 
   public func createPoolMarksLedgersAsHavingPool(
@@ -493,6 +692,48 @@ module {
     ensures Dex.pendingOut(dex, ledgerOut) == old(Dex.pendingOut(dex, ledgerOut));
   {
     Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut)
+  };
+
+  public func quotePreservesAccountingBalance(
+    dex : Dex.State,
+    ledgerIn : Principal,
+    ledgerOut : Principal,
+    amountIn : Nat,
+    minAmountOut : Nat
+  ) : Types.Result<Types.QuoteReceipt, Types.QuoteError>
+    requires Dex.accountingBalanced(dex, ledgerIn);
+    requires Dex.accountingBalanced(dex, ledgerOut);
+    ensures Dex.accountingBalanced(dex, ledgerIn);
+    ensures Dex.accountingBalanced(dex, ledgerOut);
+  {
+    let beforeNetIn = Dex.ledgerNet(dex, ledgerIn);
+    let beforeObligationIn = Dex.localObligation(dex, ledgerIn);
+    let beforePendingIn = Dex.pendingOut(dex, ledgerIn);
+    let beforeNetOut = Dex.ledgerNet(dex, ledgerOut);
+    let beforeObligationOut = Dex.localObligation(dex, ledgerOut);
+    let beforePendingOut = Dex.pendingOut(dex, ledgerOut);
+    assert beforeNetIn == beforeObligationIn + beforePendingIn;
+    assert beforeNetOut == beforeObligationOut + beforePendingOut;
+    let out = Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNetIn,
+      beforeObligationIn,
+      beforePendingIn,
+      Dex.ledgerNet(dex, ledgerIn),
+      Dex.localObligation(dex, ledgerIn),
+      Dex.pendingOut(dex, ledgerIn)
+    );
+    unchangedDeltasPreserveAccountingBalance(
+      beforeNetOut,
+      beforeObligationOut,
+      beforePendingOut,
+      Dex.ledgerNet(dex, ledgerOut),
+      Dex.localObligation(dex, ledgerOut),
+      Dex.pendingOut(dex, ledgerOut)
+    );
+    assert Dex.accountingBalanced(dex, ledgerIn);
+    assert Dex.accountingBalanced(dex, ledgerOut);
+    out
   };
 
   public func liquidityMovesPoolSharesWhenSlotsDistinct(

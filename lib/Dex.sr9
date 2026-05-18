@@ -308,6 +308,10 @@ module {
   ) : Types.Result<(), Types.ControllerLedgerError>
     requires true;
     ensures controllerOf(dex) == old(controllerOf(dex));
+    ensures localLedgerBalanceTotal(dex, ledger) == old(localLedgerBalanceTotal(dex, ledger));
+    ensures localObligation(dex, ledger) == old(localObligation(dex, ledger));
+    ensures pendingOut(dex, ledger) == old(pendingOut(dex, ledger));
+    ensures ledgerNet(dex, ledger) == old(ledgerNet(dex, ledger));
     ensures switch (result) {
       case (#ok(_)) { not ledgerHasPool(dex, ledger) };
       case (#err(_)) { true }

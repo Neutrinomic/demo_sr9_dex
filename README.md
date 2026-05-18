@@ -60,6 +60,9 @@ are checked as part of the normal development workflow.
 The current verified surface includes these guarantees:
 
 - Deposits credit a user only after the ledger `transfer_from` returns success.
+- State-level observers prove the real `Dex` deposit path preserves the
+  conservation equation `ledgerNet == localObligation + pendingOut` for a
+  settled ledger, including the actor-facing successful deposit completion.
 - Withdrawals debit local balance before the external ledger call and restore
   the exact pending debit if the ledger returns an error or rejects.
 - Forced ledger returns use pending state and restore the exact pending local
@@ -68,6 +71,9 @@ The current verified surface includes these guarantees:
 - Swap execution recomputes against current pool reserves and enforces
   `minAmountOut`.
 - Quote and swap receipts expose the same constant-product output formula.
+- Quote and ledger-lifecycle transitions have state-level observer proofs that
+  preserve `ledgerNet == localObligation + pendingOut` for the touched ledgers,
+  including ledger add, retire, and final removal.
 - Successful swaps cannot drain the output reserve.
 - The 0.3% swap fee is split into platform and LP portions, with exact receipt
   equations for the split: 20% of the fee goes to the controller as platform
@@ -169,25 +175,25 @@ target currently verifies.
 
 | Target | Current result | Seconds |
 | --- | ---: | ---: |
-| `core/src/Principal.sr9` | PASS | 0.278 |
+| `core/src/Principal.sr9` | PASS | 0.277 |
 | `core/src/pattern/ICRCLedger.sr9` | PASS | 0.326 |
-| `lib/Types.sr9` | PASS | 0.285 |
-| `lib/AssetKey.sr9` | PASS | 0.704 |
-| `lib/AssetTotals.sr9` | PASS | 10.538 |
-| `lib/BalanceBook.sr9` | PASS | 19.628 |
-| `lib/LedgerSet.sr9` | PASS | 8.680 |
-| `lib/InFlightDeposits.sr9` | PASS | 7.325 |
-| `lib/PendingWithdrawals.sr9` | PASS | 8.952 |
-| `lib/PendingReturns.sr9` | PASS | 8.857 |
-| `lib/LedgerAccounting.sr9` | PASS | 7.388 |
-| `lib/AmmMath.sr9` | PASS | 0.821 |
-| `lib/Pool.sr9` | PASS | 1.212 |
-| `lib/PoolRegistry.sr9` | PASS | 53.295 |
-| `lib/Dex.sr9` | PASS | 178.063 |
-| `proofs/InvariantObservers.sr9` | PASS | 204.572 |
-| `proofs/LedgerRoundTripObservers.sr9` | PASS | 196.118 |
-| `proofs/AttackObservers.sr9` | PASS | 1.218 |
-| `DexActorDemo.sr9` | PASS | 199.114 |
+| `lib/Types.sr9` | PASS | 0.286 |
+| `lib/AssetKey.sr9` | PASS | 0.694 |
+| `lib/AssetTotals.sr9` | PASS | 10.742 |
+| `lib/BalanceBook.sr9` | PASS | 19.973 |
+| `lib/LedgerSet.sr9` | PASS | 8.786 |
+| `lib/InFlightDeposits.sr9` | PASS | 7.399 |
+| `lib/PendingWithdrawals.sr9` | PASS | 9.088 |
+| `lib/PendingReturns.sr9` | PASS | 9.024 |
+| `lib/LedgerAccounting.sr9` | PASS | 7.474 |
+| `lib/AmmMath.sr9` | PASS | 0.873 |
+| `lib/Pool.sr9` | PASS | 1.207 |
+| `lib/PoolRegistry.sr9` | PASS | 53.322 |
+| `lib/Dex.sr9` | PASS | 175.340 |
+| `proofs/InvariantObservers.sr9` | PASS | 205.550 |
+| `proofs/LedgerRoundTripObservers.sr9` | PASS | 196.356 |
+| `proofs/AttackObservers.sr9` | PASS | 1.196 |
+| `DexActorDemo.sr9` | PASS | 209.750 |
 
 ## Development Rule
 
