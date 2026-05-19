@@ -1,4 +1,5 @@
 import BMap "mo:core/pure/BMap";
+import Profile "./Profile";
 import Text "mo:core/Text";
 
 module {
@@ -51,9 +52,11 @@ module {
     requires true;
     ensures count(guards, ledgerKey) == old(count(guards, ledgerKey)) + 1;
   {
+    Profile.mark("dex:InFlightDeposits:begin:start");
     let current = mapGet(guards.counts, ledgerKey);
     assert BMap.orderedBy<Text, Nat>(guards.counts, Text.compare);
-    guards.counts := putCount(guards.counts, ledgerKey, current + 1)
+    guards.counts := putCount(guards.counts, ledgerKey, current + 1);
+    Profile.mark("dex:InFlightDeposits:begin:end")
   };
 
   public func end(guards : InFlightDeposits, ledgerKey : Text) : ()
@@ -65,11 +68,13 @@ module {
       count(guards, ledgerKey) == 0
     };
   {
+    Profile.mark("dex:InFlightDeposits:end:start");
     let current = mapGet(guards.counts, ledgerKey);
     if (current > 0) {
       assert BMap.orderedBy<Text, Nat>(guards.counts, Text.compare);
       guards.counts := putCount(guards.counts, ledgerKey, current - 1)
-    }
+    };
+    Profile.mark("dex:InFlightDeposits:end:end")
   };
 
   public pure func hasLedger(guards : InFlightDeposits, ledgerKey : Text) : Bool

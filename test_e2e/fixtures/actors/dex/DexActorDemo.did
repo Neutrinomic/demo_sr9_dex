@@ -1,0 +1,343 @@
+type WithdrawReceipt = 
+ record {
+   amount: nat;
+   balanceKey: text;
+   debitAmount: nat;
+   fee: nat;
+   ledger: principal;
+   txIndex: nat;
+ };
+type WithdrawError = 
+ variant {
+   insufficientLocalBalance;
+   ledgerNotWhitelisted: principal;
+   ledgerTransferErr: TransferError;
+   ledgerTransferRejected: LedgerReject;
+   withdrawInProgress;
+   zeroAmount;
+ };
+type TransferFromError = 
+ variant {
+   BadBurn: record {min_burn_amount: nat;};
+   BadFee: record {expected_fee: nat;};
+   CreatedInFuture: record {ledger_time: nat64;};
+   Duplicate: record {duplicate_of: nat;};
+   GenericError: record {
+                   error_code: nat;
+                   message: text;
+                 };
+   InsufficientAllowance: record {allowance: nat;};
+   InsufficientFunds: record {balance: nat;};
+   TemporarilyUnavailable;
+   TooOld;
+ };
+type TransferError = 
+ variant {
+   BadBurn: record {min_burn_amount: nat;};
+   BadFee: record {expected_fee: nat;};
+   CreatedInFuture: record {ledger_time: nat64;};
+   Duplicate: record {duplicate_of: nat;};
+   GenericError: record {
+                   error_code: nat;
+                   message: text;
+                 };
+   InsufficientFunds: record {balance: nat;};
+   TemporarilyUnavailable;
+   TooOld;
+ };
+type SwapReceipt = 
+ record {
+   amountIn: nat;
+   amountOut: nat;
+   effectiveAmountIn: nat;
+   fee: nat;
+   ledgerIn: principal;
+   ledgerOut: principal;
+   lpFee: nat;
+   minAmountOut: nat;
+   platformFee: nat;
+   reserveInAfter: nat;
+   reserveInBefore: nat;
+   reserveOutAfter: nat;
+   reserveOutBefore: nat;
+ };
+type SwapError = 
+ variant {
+   insufficientLiquidity;
+   insufficientLocalBalance;
+   ledgerNotActive: principal;
+   poolNotFound;
+   sameLedger;
+   slippage;
+   zeroAmount;
+ };
+type ReturnLedgerBalancesReceipt = 
+ record {
+   fee: nat;
+   ledger: principal;
+   localBalance: nat;
+   remainingLocalBalance: nat;
+   returnedAmount: nat;
+   returnedUser: opt principal;
+   returnedUsers: nat;
+   txIndex: opt nat;
+ };
+type ReturnLedgerBalancesError = 
+ variant {
+   ledgerHasPendingOps: principal;
+   ledgerHasPools: principal;
+   ledgerNotRetiring: principal;
+   ledgerNotWhitelisted: principal;
+   ledgerTransferErr: TransferError;
+   ledgerTransferRejected: LedgerReject;
+   notController;
+   onlyDustBalances: record {
+                       fee: nat;
+                       remainingLocalBalance: nat;
+                     };
+   returnBalanceDoesNotCoverFee: record {
+                                   balance: nat;
+                                   fee: nat;
+                                 };
+ };
+type Result_9 = 
+ variant {
+   err: DustAbandonError;
+   ok: DustAbandonReceipt;
+ };
+type Result_8 = 
+ variant {
+   err: ControllerLedgerError;
+   ok;
+ };
+type Result_7 = 
+ variant {
+   err: CreatePoolError;
+   ok: PoolInfo;
+ };
+type Result_6 = 
+ variant {
+   err: DepositError;
+   ok: DepositReceipt;
+ };
+type Result_5 = 
+ variant {
+   err: LiquidityError;
+   ok: LiquidityReceipt;
+ };
+type Result_4 = 
+ variant {
+   err: QuoteError;
+   ok: QuoteReceipt;
+ };
+type Result_3 = 
+ variant {
+   err: RemovePoolError;
+   ok: RemovePoolReceipt;
+ };
+type Result_2 = 
+ variant {
+   err: ReturnLedgerBalancesError;
+   ok: ReturnLedgerBalancesReceipt;
+ };
+type Result_1 = 
+ variant {
+   err: SwapError;
+   ok: SwapReceipt;
+ };
+type Result = 
+ variant {
+   err: WithdrawError;
+   ok: WithdrawReceipt;
+ };
+type RemovePoolReceipt = 
+ record {
+   burnedLockedShares: nat;
+   burnedUserShares: nat;
+   controllerLockedA: nat;
+   controllerLockedB: nat;
+   key: text;
+   ledgerA: principal;
+   ledgerB: principal;
+   returnedA: nat;
+   returnedB: nat;
+   settledUsers: nat;
+ };
+type RemovePoolError = 
+ variant {
+   notController;
+   poolNotFound;
+   sameLedger;
+ };
+type RemoveLiquidityReceipt = 
+ record {
+   amountA: nat;
+   amountB: nat;
+   ledgerA: principal;
+   ledgerB: principal;
+   poolKey: text;
+   shares: nat;
+ };
+type QuoteReceipt = 
+ record {
+   amountIn: nat;
+   amountOut: nat;
+   effectiveAmountIn: nat;
+   fee: nat;
+   ledgerIn: principal;
+   ledgerOut: principal;
+   lpFee: nat;
+   minAmountOut: nat;
+   ok: bool;
+   platformFee: nat;
+   reserveIn: nat;
+   reserveOut: nat;
+ };
+type QuoteError = 
+ variant {
+   insufficientLiquidity;
+   ledgerNotActive: principal;
+   poolNotFound;
+   sameLedger;
+   zeroAmount;
+ };
+type PoolInfo = 
+ record {
+   id: nat;
+   key: text;
+   ledgerA: principal;
+   ledgerB: principal;
+   lockedShares: nat;
+   reserveA: nat;
+   reserveB: nat;
+   totalShares: nat;
+ };
+type LiquidityRequest = 
+ variant {
+   add:
+    record {
+      ledgerA: principal;
+      ledgerB: principal;
+      maxAmountA: nat;
+      maxAmountB: nat;
+      minShares: nat;
+    };
+   rem:
+    record {
+      ledgerA: principal;
+      ledgerB: principal;
+      minAmountA: nat;
+      minAmountB: nat;
+      shares: nat;
+    };
+ };
+type LiquidityReceipt = 
+ variant {
+   added: AddLiquidityReceipt;
+   removed: RemoveLiquidityReceipt;
+ };
+type LiquidityError = 
+ variant {
+   insufficientLiquidity;
+   insufficientLocalBalance;
+   ledgerNotActive: principal;
+   ledgerNotWhitelisted: principal;
+   poolNotFound;
+   sameLedger;
+   slippage;
+   zeroAmount;
+ };
+type LedgerReject = record {message: text;};
+type DustAbandonReceipt = 
+ record {
+   abandonedAmount: nat;
+   abandonedDustTotal: nat;
+   balanceKey: text;
+   fee: nat;
+   ledger: principal;
+   user: principal;
+ };
+type DustAbandonError = 
+ variant {
+   balanceExceedsFee: record {
+                        balance: nat;
+                        fee: nat;
+                      };
+   ledgerHasPendingOps: principal;
+   ledgerHasPools: principal;
+   ledgerNotRetiring: principal;
+   ledgerNotWhitelisted: principal;
+   noLocalBalance;
+ };
+type DexActorDemo = 
+ service {
+   abandonDust: (ledger: principal) -> (Result_9);
+   balances: (user: principal) -> (vec record {
+                                         text;
+                                         nat;
+                                       }) query;
+   controller_ledger: (action: ControllerLedgerAction) -> (Result_8);
+   createPool: (ledgerA: principal, ledgerB: principal) -> (Result_7);
+   deposit: (ledger: principal, amount: nat) -> (Result_6);
+   liquidity: (request: LiquidityRequest) -> (Result_5);
+   pools: () -> (vec PoolInfo) query;
+   quote: (ledgerIn: principal, ledgerOut: principal, amountIn: nat,
+    minAmountOut: nat) -> (Result_4) query;
+   removePool: (ledgerA: principal, ledgerB: principal) -> (Result_3);
+   returnLedgerBalances: (ledger: principal) -> (Result_2);
+   swap: (ledgerIn: principal, ledgerOut: principal, amountIn: nat,
+    minAmountOut: nat) -> (Result_1);
+   withdraw: (ledger: principal, amount: nat) -> (Result);
+ };
+type DepositReceipt = 
+ record {
+   amount: nat;
+   balanceKey: text;
+   ledger: principal;
+   txIndex: nat;
+ };
+type DepositError = 
+ variant {
+   ledgerNotActive: principal;
+   ledgerTransferFromErr: TransferFromError;
+   ledgerTransferFromRejected: LedgerReject;
+   zeroAmount;
+ };
+type CreatePoolError = 
+ variant {
+   ledgerNotActive: principal;
+   notController;
+   poolAlreadyExists;
+   sameLedger;
+ };
+type ControllerLedgerError = 
+ variant {
+   ledgerAlreadyActive: principal;
+   ledgerAlreadyRetiring: principal;
+   ledgerFeeRejected: LedgerReject;
+   ledgerHasLocalBalances: principal;
+   ledgerHasPendingOps: principal;
+   ledgerHasPools: principal;
+   ledgerNotRetiring: principal;
+   ledgerNotWhitelisted: principal;
+   notController;
+ };
+type ControllerLedgerAction = 
+ variant {
+   add: principal;
+   rem: principal;
+   retire: principal;
+ };
+type AddLiquidityReceipt = 
+ record {
+   ledgerA: principal;
+   ledgerB: principal;
+   leftoverA: nat;
+   leftoverB: nat;
+   lockedShares: nat;
+   poolKey: text;
+   shares: nat;
+   usedA: nat;
+   usedB: nat;
+ };
+service : (controller: principal) -> DexActorDemo

@@ -5,6 +5,7 @@ import BMap "mo:core/pure/BMap";
 import BSeq "mo:core/pure/BSeq";
 import Pool "./Pool";
 import Principal "mo:core/Principal";
+import Profile "./Profile";
 import Text "mo:core/Text";
 import Types "./Types";
 
@@ -105,6 +106,7 @@ module {
   private func keyInLog(registry : PoolRegistry, key : Text) : Bool
     requires true;
   {
+    Profile.mark("dex:PoolRegistry:keyInLog:start");
     var i = 0;
     while (i < BSeq.size<Text>(registry.poolKeys)) {
       loop:invariant i <= BSeq.size<Text>(registry.poolKeys);
@@ -112,10 +114,12 @@ module {
       loop:invariant registry.ledgerPoolCounts == old(registry.ledgerPoolCounts);
       loop:invariant registry.nextId == old(registry.nextId);
       if (BSeq.getNat<Text>(registry.poolKeys, i) == key) {
+        Profile.mark("dex:PoolRegistry:keyInLog:end");
         return true
       };
       i += 1
     };
+    Profile.mark("dex:PoolRegistry:keyInLog:end");
     false
   };
 
@@ -307,10 +311,18 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:PoolRegistry:quote:start");
     let key = AssetKey.pool(ledgerIn, ledgerOut);
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
-      case null { #err(#poolNotFound) };
-      case (?pool) { Pool.quoteExactIn(pool, ledgerIn, ledgerOut, amountIn, minAmountOut) }
+      case null {
+        Profile.mark("dex:PoolRegistry:quote:end");
+        #err(#poolNotFound)
+      };
+      case (?pool) {
+        let out = Pool.quoteExactIn(pool, ledgerIn, ledgerOut, amountIn, minAmountOut);
+        Profile.mark("dex:PoolRegistry:quote:end");
+        out
+      }
     }
   };
 
@@ -344,15 +356,22 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:PoolRegistry:planSwap:start");
     let key = AssetKey.pool(ledgerIn, ledgerOut);
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
-      case null { #err(#poolNotFound) };
+      case null {
+        Profile.mark("dex:PoolRegistry:planSwap:end");
+        #err(#poolNotFound)
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != key) {
+          Profile.mark("dex:PoolRegistry:planSwap:end");
           return #err(#poolNotFound)
         };
-        Pool.planSwap(pool, ledgerIn, ledgerOut, amountIn, minAmountOut)
+        let out = Pool.planSwap(pool, ledgerIn, ledgerOut, amountIn, minAmountOut);
+        Profile.mark("dex:PoolRegistry:planSwap:end");
+        out
       }
     }
   };
@@ -397,19 +416,28 @@ module {
       }
     };
   {
+    Profile.mark("dex:PoolRegistry:applySwap:start");
     let inKey = AssetKey.ledger(plan.ledgerIn);
     let outKey = AssetKey.ledger(plan.ledgerOut);
     if (inKey == outKey) {
+      Profile.mark("dex:PoolRegistry:applySwap:end");
       return null
     };
     if (AssetTotals.get(registry.reserves, outKey) < plan.amountOut) {
+      Profile.mark("dex:PoolRegistry:applySwap:end");
       return null
     };
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
-      case null { null };
+      case null {
+        Profile.mark("dex:PoolRegistry:applySwap:end");
+        null
+      };
       case (?pool) {
         switch (Pool.applySwap(pool, plan)) {
-          case null { null };
+          case null {
+            Profile.mark("dex:PoolRegistry:applySwap:end");
+            null
+          };
           case (?receipt) {
             AssetTotals.credit(
               registry.reserves,
@@ -417,6 +445,7 @@ module {
               plan.effectiveAmountIn + plan.lpFee
             );
             AssetTotals.debit(registry.reserves, outKey, plan.amountOut);
+            Profile.mark("dex:PoolRegistry:applySwap:end");
             ?receipt
           }
         }
@@ -454,17 +483,24 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:PoolRegistry:planAdd:start");
     let key = AssetKey.pool(ledgerA, ledgerB);
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
-      case null { #err(#poolNotFound) };
+      case null {
+        Profile.mark("dex:PoolRegistry:planAdd:end");
+        #err(#poolNotFound)
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != key) {
+          Profile.mark("dex:PoolRegistry:planAdd:end");
           return #err(#poolNotFound)
         };
         let canonicalMaxA = if (ledgerA == info.ledgerA) { maxAmountA } else { maxAmountB };
         let canonicalMaxB = if (ledgerA == info.ledgerA) { maxAmountB } else { maxAmountA };
-        Pool.planAdd(pool, canonicalMaxA, canonicalMaxB, minShares)
+        let out = Pool.planAdd(pool, canonicalMaxA, canonicalMaxB, minShares);
+        Profile.mark("dex:PoolRegistry:planAdd:end");
+        out
       }
     }
   };
@@ -492,19 +528,26 @@ module {
       }
     };
   {
+    Profile.mark("dex:PoolRegistry:applyAdd:start");
     let aKey = AssetKey.ledger(plan.ledgerA);
     let bKey = AssetKey.ledger(plan.ledgerB);
     if (aKey == bKey) {
+      Profile.mark("dex:PoolRegistry:applyAdd:end");
       return null
     };
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
-      case null { null };
+      case null {
+        Profile.mark("dex:PoolRegistry:applyAdd:end");
+        null
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != plan.poolKey) {
+          Profile.mark("dex:PoolRegistry:applyAdd:end");
           return null
         };
         if (info.ledgerA != plan.ledgerA or info.ledgerB != plan.ledgerB) {
+          Profile.mark("dex:PoolRegistry:applyAdd:end");
           return null
         };
         if (
@@ -516,6 +559,7 @@ module {
             plan.lockedSharesAdded == AmmMath.minimumLiquidity()
           )
         ) {
+          Profile.mark("dex:PoolRegistry:applyAdd:end");
           return null
         };
         assert plan.poolKey == Pool.model(pool).key;
@@ -530,6 +574,7 @@ module {
         assert receipt.leftoverB == plan.leftoverB;
         assert receipt.shares == plan.shares;
         assert receipt.lockedShares == plan.lockedSharesAdded;
+        Profile.mark("dex:PoolRegistry:applyAdd:end");
         ?receipt
       }
     }
@@ -559,18 +604,26 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:PoolRegistry:planRemove:start");
     let key = AssetKey.pool(ledgerA, ledgerB);
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
-      case null { #err(#poolNotFound) };
+      case null {
+        Profile.mark("dex:PoolRegistry:planRemove:end");
+        #err(#poolNotFound)
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != key) {
+          Profile.mark("dex:PoolRegistry:planRemove:end");
           return #err(#poolNotFound)
         };
         let canonicalMinA = if (ledgerA == info.ledgerA) { minAmountA } else { minAmountB };
         let canonicalMinB = if (ledgerA == info.ledgerA) { minAmountB } else { minAmountA };
         switch (Pool.planRemove(pool, shares, canonicalMinA, canonicalMinB)) {
-          case (#err err) { #err(err) };
+          case (#err err) {
+            Profile.mark("dex:PoolRegistry:planRemove:end");
+            #err(err)
+          };
           case (#ok plan) {
             assert plan.ledgerA == info.ledgerA;
             assert plan.amountA >= canonicalMinA;
@@ -586,6 +639,7 @@ module {
               assert plan.amountA >= minAmountB;
               assert plan.amountB >= minAmountA
             };
+            Profile.mark("dex:PoolRegistry:planRemove:end");
             #ok(plan)
           }
         }
@@ -612,33 +666,45 @@ module {
       }
     };
   {
+    Profile.mark("dex:PoolRegistry:applyRemove:start");
     let aKey = AssetKey.ledger(plan.ledgerA);
     let bKey = AssetKey.ledger(plan.ledgerB);
     if (aKey == bKey) {
+      Profile.mark("dex:PoolRegistry:applyRemove:end");
       return null
     };
     if (
       AssetTotals.get(registry.reserves, aKey) < plan.amountA or
       AssetTotals.get(registry.reserves, bKey) < plan.amountB
     ) {
+      Profile.mark("dex:PoolRegistry:applyRemove:end");
       return null
     };
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, plan.poolKey)) {
-      case null { null };
+      case null {
+        Profile.mark("dex:PoolRegistry:applyRemove:end");
+        null
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != plan.poolKey) {
+          Profile.mark("dex:PoolRegistry:applyRemove:end");
           return null
         };
         if (info.ledgerA != plan.ledgerA or info.ledgerB != plan.ledgerB) {
+          Profile.mark("dex:PoolRegistry:applyRemove:end");
           return null
         };
         assert plan.poolKey == Pool.model(pool).key;
         switch (Pool.applyRemove(pool, plan)) {
-          case null { null };
+          case null {
+            Profile.mark("dex:PoolRegistry:applyRemove:end");
+            null
+          };
           case (?receipt) {
             AssetTotals.debit(registry.reserves, aKey, plan.amountA);
             AssetTotals.debit(registry.reserves, bKey, plan.amountB);
+            Profile.mark("dex:PoolRegistry:applyRemove:end");
             ?receipt
           }
         }
@@ -667,29 +733,37 @@ module {
       }
     };
   {
+    Profile.mark("dex:PoolRegistry:deletePool:start");
     let key = AssetKey.pool(ledgerA, ledgerB);
     switch (BMap.get<Text, Pool.Pool>(registry.pools, Text.compare, key)) {
-      case null { null };
+      case null {
+        Profile.mark("dex:PoolRegistry:deletePool:end");
+        null
+      };
       case (?pool) {
         let info = Pool.info(pool);
         if (info.key != key) {
+          Profile.mark("dex:PoolRegistry:deletePool:end");
           return null
         };
         let aKey = AssetKey.ledger(info.ledgerA);
         let bKey = AssetKey.ledger(info.ledgerB);
         if (aKey == bKey) {
+          Profile.mark("dex:PoolRegistry:deletePool:end");
           return null
         };
         if (
           AssetTotals.get(registry.reserves, aKey) < info.reserveA or
           AssetTotals.get(registry.reserves, bKey) < info.reserveB
         ) {
+          Profile.mark("dex:PoolRegistry:deletePool:end");
           return null
         };
         if (
           countGet(registry.ledgerPoolCounts, aKey) == 0 or
           countGet(registry.ledgerPoolCounts, bKey) == 0
         ) {
+          Profile.mark("dex:PoolRegistry:deletePool:end");
           return null
         };
         let aCount = countGet(registry.ledgerPoolCounts, aKey);
@@ -708,6 +782,7 @@ module {
         registry.pools := nextPools;
         assert Map.contains<Text, Pool.Pool>(key, model(registry)) == false;
         assert Map.contains<Text, Pool.Pool>(info.key, model(registry)) == false;
+        Profile.mark("dex:PoolRegistry:deletePool:end");
         ?info
       }
     }
@@ -761,6 +836,7 @@ module {
         poolInfoCanonical(Seq.get<Types.PoolInfo>(BSeq.Spec.arrayToSeq<Types.PoolInfo>(result), i))
       } else { true });
   {
+    Profile.mark("dex:PoolRegistry:list:start");
     var seq = BSeq.empty<Types.PoolInfo>();
     var i = 0;
     while (i < BSeq.size<Text>(registry.poolKeys)) {
@@ -789,6 +865,7 @@ module {
       i += 1
     };
     let out = BSeq.toArray<Types.PoolInfo>(seq);
+    Profile.mark("dex:PoolRegistry:list:end");
     out
   };
 }

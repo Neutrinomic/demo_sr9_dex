@@ -1,5 +1,6 @@
 import BMap "mo:core/pure/BMap";
 import Principal "mo:core/Principal";
+import Profile "./Profile";
 import Text "mo:core/Text";
 import Types "./Types";
 
@@ -181,8 +182,10 @@ module {
       totalValue(pending, ledgerKey) == old(totalValue(pending, ledgerKey))
     };
   {
+    Profile.mark("dex:PendingReturns:begin:start");
     let key = recordKey(user, ledgerKey);
     if (mapGetRecord(pending.localBalances, key) > 0) {
+      Profile.mark("dex:PendingReturns:begin:end");
       return false
     };
     assert BMap.orderedBy<Text, Nat>(pending.localBalances, Text.compare);
@@ -194,6 +197,7 @@ module {
     let currentTotal = mapGetLedger(pending.totals, ledgerKey);
     assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
     pending.totals := putLedger(pending.totals, ledgerKey, currentTotal + record.localBalance);
+    Profile.mark("dex:PendingReturns:begin:end");
     true
   };
 
@@ -230,9 +234,11 @@ module {
       }
     };
   {
+    Profile.mark("dex:PendingReturns:take:start");
     let key = recordKey(user, ledgerKey);
     let localBalance = mapGetRecord(pending.localBalances, key);
     if (localBalance == 0) {
+      Profile.mark("dex:PendingReturns:take:end");
       null
     } else {
       let record = {
@@ -254,6 +260,7 @@ module {
       };
       assert BMap.orderedBy<Text, Nat>(pending.totals, Text.compare);
       pending.totals := putLedger(pending.totals, ledgerKey, nextTotal);
+      Profile.mark("dex:PendingReturns:take:end");
       ?record
     }
   };

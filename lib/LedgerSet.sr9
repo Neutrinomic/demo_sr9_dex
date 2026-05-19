@@ -1,5 +1,6 @@
 import BMap "mo:core/pure/BMap";
 import Principal "mo:core/Principal";
+import Profile "./Profile";
 import Text "mo:core/Text";
 import Types "./Types";
 
@@ -156,12 +157,20 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:LedgerSet:add:start");
     switch (status(ledgers, ledger)) {
-      case (#active) { #err(#ledgerAlreadyActive ledger) };
-      case (#retiring) { #err(#ledgerAlreadyRetiring ledger) };
+      case (#active) {
+        Profile.mark("dex:LedgerSet:add:end");
+        #err(#ledgerAlreadyActive ledger)
+      };
+      case (#retiring) {
+        Profile.mark("dex:LedgerSet:add:end");
+        #err(#ledgerAlreadyRetiring ledger)
+      };
       case (#absent) {
         putStatus(ledgers, ledger, #active);
         putFee(ledgers, ledger, fee);
+        Profile.mark("dex:LedgerSet:add:end");
         #ok(())
       }
     }
@@ -177,11 +186,19 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:LedgerSet:retire:start");
     switch (status(ledgers, ledger)) {
-      case (#absent) { #err(#ledgerNotWhitelisted ledger) };
-      case (#retiring) { #ok(()) };
+      case (#absent) {
+        Profile.mark("dex:LedgerSet:retire:end");
+        #err(#ledgerNotWhitelisted ledger)
+      };
+      case (#retiring) {
+        Profile.mark("dex:LedgerSet:retire:end");
+        #ok(())
+      };
       case (#active) {
         putStatus(ledgers, ledger, #retiring);
+        Profile.mark("dex:LedgerSet:retire:end");
         #ok(())
       }
     }
@@ -197,11 +214,19 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:LedgerSet:rem:start");
     switch (status(ledgers, ledger)) {
-      case (#absent) { #err(#ledgerNotWhitelisted ledger) };
-      case (#active) { #err(#ledgerNotRetiring ledger) };
+      case (#absent) {
+        Profile.mark("dex:LedgerSet:rem:end");
+        #err(#ledgerNotWhitelisted ledger)
+      };
+      case (#active) {
+        Profile.mark("dex:LedgerSet:rem:end");
+        #err(#ledgerNotRetiring ledger)
+      };
       case (#retiring) {
         clear(ledgers, ledger);
+        Profile.mark("dex:LedgerSet:rem:end");
         #ok(())
       }
     }
@@ -211,8 +236,10 @@ module {
     requires true;
     ensures model(ledgers) == old(model(ledgers));
   {
+    Profile.mark("dex:LedgerSet:refreshFee:start");
     if (isListed(ledgers, ledger)) {
       putFee(ledgers, ledger, expectedFee)
-    }
+    };
+    Profile.mark("dex:LedgerSet:refreshFee:end")
   };
 }

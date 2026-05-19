@@ -6,6 +6,8 @@ import Dex "./lib/Dex";
 import ICRCLedger "mo:core/pattern/ICRCLedger";
 import PoolRegistry "./lib/PoolRegistry";
 import Principal "mo:core/Principal";
+import Profiling "mo:core/Profiling";
+import ProfileConfig "./lib/ProfileConfig";
 import Runtime "mo:core/Runtime";
 import Types "./lib/Types";
 
@@ -59,8 +61,11 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPre:start") };
     ghost var controllerBefore = Dex.controllerOf(dex);
-    switch (Dex.beginDeposit(dex, ledger, amount)) {
+    let started = Dex.beginDeposit(dex, ledger, amount);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPre:end") };
+    switch (started) {
       case (#err err) { #err(err) };
       case (#ok _) {
         assert Dex.controllerOf(dex) == controllerBefore;
@@ -75,8 +80,11 @@ persistent actor class DexActorDemo(controller : Principal) {
           amount = amount
         };
         try {
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:start") };
           let result = await remote.icrc2_transfer_from(args);
-          switch (result) {
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:end") };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:start") };
+          let out = switch (result) {
             case (#Ok txIndex) {
               let out = Dex.finishDepositOk(dex, caller, ledger, amount, txIndex);
               assert Dex.controllerOf(dex) == controller;
@@ -84,9 +92,15 @@ persistent actor class DexActorDemo(controller : Principal) {
               out
             };
             case (#Err err) { Dex.finishDepositErr(dex, ledger, err) }
-          }
+          };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:end") };
+          out
         } catch (_) {
-          Dex.finishDepositReject(dex, ledger, ledgerReject())
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:end") };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:start") };
+          let out = Dex.finishDepositReject(dex, ledger, ledgerReject());
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:end") };
+          out
         }
       }
     }
@@ -110,7 +124,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    switch (Dex.beginWithdraw(dex, caller, ledger, amount)) {
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPre:start") };
+    let startedResult = Dex.beginWithdraw(dex, caller, ledger, amount);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPre:end") };
+    switch (startedResult) {
       case (#err err) { #err(err) };
       case (#ok started) {
         assert started.debitAmount == started.amount + started.fee;
@@ -124,8 +141,11 @@ persistent actor class DexActorDemo(controller : Principal) {
           amount = amount
         };
         try {
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:start") };
           let result = await remote.icrc1_transfer(args);
-          switch (result) {
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:end") };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:start") };
+          let out = switch (result) {
             case (#Ok txIndex) {
               let out = Dex.finishWithdrawOk(dex, caller, started, txIndex);
               assert Dex.controllerOf(dex) == controller;
@@ -133,9 +153,15 @@ persistent actor class DexActorDemo(controller : Principal) {
               out
             };
             case (#Err err) { Dex.finishWithdrawErr(dex, caller, started, err) }
-          }
+          };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:end") };
+          out
         } catch (_) {
-          Dex.finishWithdrawReject(dex, caller, started, ledgerReject())
+          if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:end") };
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:start") };
+          let out = Dex.finishWithdrawReject(dex, caller, started, ledgerReject());
+          if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:end") };
+          out
         }
       }
     }
@@ -176,7 +202,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:quote:start") };
+    let out = Dex.quote(dex, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:quote:end") };
+    out
   };
 
   // Swaps deposited local balance from `ledgerIn` to `ledgerOut`, recomputes the
@@ -218,7 +247,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:swap:start") };
+    let out = Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:swap:end") };
+    out
   };
 
   // Adds or removes liquidity using only deposited local balances. LP positions
@@ -298,7 +330,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       }
     };
   {
-    Dex.liquidity(dex, caller, request)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:liquidity:start") };
+    let out = Dex.liquidity(dex, caller, request);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:liquidity:end") };
+    out
   };
 
   // Lists every positive local balance for `user`, including real ledger keys
@@ -308,7 +343,10 @@ persistent actor class DexActorDemo(controller : Principal) {
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
   {
-    Dex.balances(dex, user)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:balances:start") };
+    let out = Dex.balances(dex, user);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:balances:end") };
+    out
   };
 
   // Lists all pools and their reserves, share supply, and locked-share amount.
@@ -329,7 +367,10 @@ persistent actor class DexActorDemo(controller : Principal) {
         )
       } else { true });
   {
-    Dex.pools(dex)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:pools:start") };
+    let out = Dex.pools(dex);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:pools:end") };
+    out
   };
 
   // Controller ledger lifecycle endpoint: add reads and caches the ledger fee,
@@ -343,24 +384,39 @@ persistent actor class DexActorDemo(controller : Principal) {
   {
     switch (action) {
       case (#add ledger) {
-        switch (Dex.controllerAddLedgerPrecheck(dex, caller, ledger)) {
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPre:start") };
+        let precheck = Dex.controllerAddLedgerPrecheck(dex, caller, ledger);
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPre:end") };
+        switch (precheck) {
           case (#err err) { #err(err) };
           case (#ok _) {
             let remote = ICRCLedger.fromPrincipal(ledger);
             try {
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:feeLedger:start") };
               let fee = await remote.icrc1_fee();
-              Dex.controllerAddLedger(dex, caller, ledger, fee)
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:feeLedger:end") };
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPost:start") };
+              let out = Dex.controllerAddLedger(dex, caller, ledger, fee);
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPost:end") };
+              out
             } catch (_) {
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:feeLedger:end") };
               #err(#ledgerFeeRejected(ledgerReject()))
             }
           }
         }
       };
       case (#retire ledger) {
-        Dex.controllerRetireLedger(dex, caller, ledger)
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerRetire:start") };
+        let out = Dex.controllerRetireLedger(dex, caller, ledger);
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerRetire:end") };
+        out
       };
       case (#rem ledger) {
-        Dex.controllerRemoveLedger(dex, caller, ledger)
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerRemove:start") };
+        let out = Dex.controllerRemoveLedger(dex, caller, ledger);
+        if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerRemove:end") };
+        out
       }
     }
   };
@@ -388,7 +444,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    Dex.createPool(dex, caller, ledgerA, ledgerB)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:createPool:start") };
+    let out = Dex.createPool(dex, caller, ledgerA, ledgerB);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:createPool:end") };
+    out
   };
 
   // Controller-only pool retirement cleanup. Every user LP balance is converted
@@ -408,7 +467,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    Dex.removePool(dex, caller, ledgerA, ledgerB)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:removePool:start") };
+    let out = Dex.removePool(dex, caller, ledgerA, ledgerB);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:removePool:end") };
+    out
   };
 
   // Controller-only ledger cleanup path for a retiring ledger after its pools
@@ -425,7 +487,10 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    switch (Dex.beginReturnLedgerBalances(dex, caller, ledger)) {
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPre:start") };
+    let startedResult = Dex.beginReturnLedgerBalances(dex, caller, ledger);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPre:end") };
+    switch (startedResult) {
       case (#err err) { #err(err) };
       case (#ok started) {
         switch (started) {
@@ -442,16 +507,25 @@ persistent actor class DexActorDemo(controller : Principal) {
               amount = pending.returnedAmount
             };
             try {
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:returnLedger:start") };
               let result = await remote.icrc1_transfer(args);
-              switch (result) {
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:returnLedger:end") };
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:start") };
+              let out = switch (result) {
                 case (#Ok txIndex) {
                   assert pending.returnedAmount + pending.fee == pending.localBalance;
                   Dex.finishReturnOk(dex, pending, txIndex)
                 };
                 case (#Err err) { Dex.finishReturnErr(dex, pending, err) }
-              }
+              };
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:end") };
+              out
             } catch (_) {
-              Dex.finishReturnReject(dex, pending, ledgerReject())
+              if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:returnLedger:end") };
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:start") };
+              let out = Dex.finishReturnReject(dex, pending, ledgerReject());
+              if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:end") };
+              out
             }
           }
         }
@@ -478,6 +552,9 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err(_)) { true }
     };
   {
-    Dex.abandonDust(dex, caller, ledger)
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:abandonDust:start") };
+    let out = Dex.abandonDust(dex, caller, ledger);
+    if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:abandonDust:end") };
+    out
   };
 }

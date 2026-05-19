@@ -1,6 +1,7 @@
 import BMap "mo:core/pure/BMap";
 import BSeq "mo:core/pure/BSeq";
 import Principal "mo:core/Principal";
+import Profile "./Profile";
 import Text "mo:core/Text";
 
 module {
@@ -139,7 +140,9 @@ module {
         Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
         old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
   {
+    Profile.mark("dex:BalanceBook:credit:start");
     if (amount == 0) {
+      Profile.mark("dex:BalanceBook:credit:end");
       return
     };
     let balanceKey = recordKey(user, key);
@@ -153,7 +156,8 @@ module {
       assert BMap.orderedBy<Text, Nat>(book.seen, Text.compare);
       book.seen := put(book.seen, balanceKey, 1);
       book.holderLog := BSeq.append<(Text, Principal)>(book.holderLog, (key, user))
-    }
+    };
+    Profile.mark("dex:BalanceBook:credit:end")
   };
 
   public func debit(book : BalanceBook, user : Principal, key : Text, amount : Nat) : Bool
@@ -167,22 +171,27 @@ module {
         Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
         old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
   {
+    Profile.mark("dex:BalanceBook:debit:start");
     if (amount == 0) {
+      Profile.mark("dex:BalanceBook:debit:end");
       return true
     };
     let balanceKey = recordKey(user, key);
     let previous = mapGet(book.balances, balanceKey);
     if (previous < amount) {
+      Profile.mark("dex:BalanceBook:debit:end");
       return false
     };
     let previousTotal = mapGet(book.totals, key);
     if (previousTotal < amount) {
+      Profile.mark("dex:BalanceBook:debit:end");
       return false
     };
     assert BMap.orderedBy<Text, Nat>(book.balances, Text.compare);
     book.balances := put(book.balances, balanceKey, previous - amount);
     assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
     book.totals := put(book.totals, key, previousTotal - amount);
+    Profile.mark("dex:BalanceBook:debit:end");
     true
   };
 
@@ -196,7 +205,9 @@ module {
         Map.getOr<Text, Nat>(model(book), otherRecordKey, 0) ==
         old(Map.getOr<Text, Nat>(model(book), otherRecordKey, 0)));
   {
+    Profile.mark("dex:BalanceBook:debitKnown:start");
     if (amount == 0) {
+      Profile.mark("dex:BalanceBook:debitKnown:end");
       return
     };
     let balanceKey = recordKey(user, key);
@@ -207,7 +218,8 @@ module {
     assert BMap.orderedBy<Text, Nat>(book.balances, Text.compare);
     book.balances := put(book.balances, balanceKey, previous - amount);
     assert BMap.orderedBy<Text, Nat>(book.totals, Text.compare);
-    book.totals := put(book.totals, key, previousTotal - amount)
+    book.totals := put(book.totals, key, previousTotal - amount);
+    Profile.mark("dex:BalanceBook:debitKnown:end")
   };
 
   public func balances(book : BalanceBook, user : Principal) : [BalanceEntry]
@@ -219,6 +231,7 @@ module {
         balanceEntryMatches(book, user, Seq.get<BalanceEntry>(BSeq.Spec.arrayToSeq<BalanceEntry>(result), i))
       } else { true });
   {
+    Profile.mark("dex:BalanceBook:balances:start");
     var seq = BSeq.empty<BalanceEntry>();
     var i = 0;
     while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
@@ -242,6 +255,7 @@ module {
     let out = BSeq.toArray<BalanceEntry>(seq);
     assert model(book) == old(model(book));
     assert totalModel(book) == old(totalModel(book));
+    Profile.mark("dex:BalanceBook:balances:end");
     out
   };
 
@@ -254,6 +268,7 @@ module {
         holderMatches(book, key, Seq.get<Principal>(BSeq.Spec.arrayToSeq<Principal>(result), i))
       } else { true });
   {
+    Profile.mark("dex:BalanceBook:holders:start");
     var seq = BSeq.empty<Principal>();
     var i = 0;
     while (i < BSeq.size<(Text, Principal)>(book.holderLog)) {
@@ -272,7 +287,9 @@ module {
       };
       i += 1
     };
-    BSeq.toArray<Principal>(seq)
+    let out = BSeq.toArray<Principal>(seq);
+    Profile.mark("dex:BalanceBook:holders:end");
+    out
   };
 
   public func firstNonControllerHolder(
@@ -288,6 +305,7 @@ module {
       case (?user) { user != controller and holderMatches(book, key, user) }
     };
   {
+    Profile.mark("dex:BalanceBook:firstHolder:start");
     let holderList = holders(book, key);
     var i = 0;
     while (i < holderList.size()) {
@@ -297,10 +315,12 @@ module {
       loop:invariant book.seen == old(book.seen);
       let user = holderList[i];
       if (user != controller and mapGet(book.balances, recordKey(user, key)) > 0) {
+        Profile.mark("dex:BalanceBook:firstHolder:end");
         return ?user
       };
       i += 1
     };
+    Profile.mark("dex:BalanceBook:firstHolder:end");
     null
   };
 
@@ -322,6 +342,7 @@ module {
       }
     };
   {
+    Profile.mark("dex:BalanceBook:firstHolderAbove:start");
     let holderList = holders(book, key);
     var i = 0;
     while (i < holderList.size()) {
@@ -334,10 +355,12 @@ module {
       if (user != controller and balance > amount) {
         assert holderMatches(book, key, user);
         assert holderAbove(book, key, user, amount);
+        Profile.mark("dex:BalanceBook:firstHolderAbove:end");
         return ?user
       };
       i += 1
     };
+    Profile.mark("dex:BalanceBook:firstHolderAbove:end");
     null
   };
 }

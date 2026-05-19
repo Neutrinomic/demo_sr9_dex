@@ -1,5 +1,6 @@
 import BSeq "mo:core/pure/BSeq";
 import BMap "mo:core/pure/BMap";
+import Profile "./Profile";
 import Text "mo:core/Text";
 
 module {
@@ -64,14 +65,17 @@ module {
     ensures forall<Text>(pure func (other : Text) : Bool =
       other != key ==> value(totals, other) == old(value(totals, other)));
   {
+    Profile.mark("dex:AssetTotals:credit:start");
     if (amount == 0) {
+      Profile.mark("dex:AssetTotals:credit:end");
       return
     };
     let current = mapGet(totals.totals, key);
     assert BMap.orderedBy<Text, Nat>(totals.totals, Text.compare);
     let nextTotals = BMap.add<Text, Nat>(totals.totals, Text.compare, key, current + amount);
     assert BMap.orderedBy<Text, Nat>(nextTotals, Text.compare);
-    totals.totals := nextTotals
+    totals.totals := nextTotals;
+    Profile.mark("dex:AssetTotals:credit:end")
   };
 
   public func debit(totals : AssetTotals, key : Text, amount : Nat) : ()
@@ -81,18 +85,21 @@ module {
     ensures forall<Text>(pure func (other : Text) : Bool =
       other != key ==> value(totals, other) == old(value(totals, other)));
   {
+    Profile.mark("dex:AssetTotals:debit:start");
     let current = mapGet(totals.totals, key);
     assert BMap.orderedBy<Text, Nat>(totals.totals, Text.compare);
     let next = current - amount;
     let nextTotals = BMap.add<Text, Nat>(totals.totals, Text.compare, key, next);
     assert BMap.orderedBy<Text, Nat>(nextTotals, Text.compare);
-    totals.totals := nextTotals
+    totals.totals := nextTotals;
+    Profile.mark("dex:AssetTotals:debit:end")
   };
 
   public func list(totals : AssetTotals) : [Entry]
     requires true;
     ensures model(totals) == old(model(totals));
   {
+    Profile.mark("dex:AssetTotals:list:start");
     var seq = BSeq.empty<Entry>();
     let entries = BMap.entries<Text, Nat>(totals.totals);
     label scan loop {
@@ -105,6 +112,8 @@ module {
         }
       }
     };
-    BSeq.toArray<Entry>(seq)
+    let out = BSeq.toArray<Entry>(seq);
+    Profile.mark("dex:AssetTotals:list:end");
+    out
   };
 }

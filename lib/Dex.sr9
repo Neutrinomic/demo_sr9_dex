@@ -9,6 +9,7 @@ import LedgerAccounting "./LedgerAccounting";
 import LedgerSet "./LedgerSet";
 import PendingReturns "./PendingReturns";
 import PendingWithdrawals "./PendingWithdrawals";
+import Profile "./Profile";
 import PoolRegistry "./PoolRegistry";
 import Types "./Types";
 
@@ -73,7 +74,10 @@ module {
     requires true;
     ensures model(dex) == old(model(dex));
   {
-    BalanceBook.balances(dex.balances, user)
+    Profile.mark("dex:Dex:balances:start");
+    let out = BalanceBook.balances(dex.balances, user);
+    Profile.mark("dex:Dex:balances:end");
+    out
   };
 
   public func pools(dex : State) : [Types.PoolInfo]
@@ -92,7 +96,10 @@ module {
         )
       } else { true });
   {
-    PoolRegistry.list(dex.pools)
+    Profile.mark("dex:Dex:pools:start");
+    let out = PoolRegistry.list(dex.pools);
+    Profile.mark("dex:Dex:pools:end");
+    out
   };
 
   public pure func localBalance(dex : State, user : Principal, assetKey : Text) : Nat
@@ -423,12 +430,15 @@ module {
       return #err(#sameLedger)
     };
     let poolKey = AssetKey.pool(ledgerA, ledgerB);
+    Profile.mark("dex:Dex:removePool:holders:start");
     let holders = BalanceBook.holders(dex.balances, poolKey);
+    Profile.mark("dex:Dex:removePool:holders:end");
     switch (PoolRegistry.deletePool(dex.pools, ledgerA, ledgerB)) {
       case null {
         #err(#poolNotFound)
       };
       case (?info) {
+        Profile.mark("dex:Dex:removePool:settle:start");
         var i = 0;
         var remainingA = info.reserveA;
         var remainingB = info.reserveB;
@@ -470,6 +480,7 @@ module {
           remainingA := 0;
           remainingB := 0
         };
+        Profile.mark("dex:Dex:removePool:settle:end");
         #ok({
           key = poolKey;
           ledgerA = info.ledgerA;
@@ -827,7 +838,9 @@ module {
       case null { return #err(#ledgerNotWhitelisted ledger) };
       case (?value) { fee := value }
     };
+    Profile.mark("dex:Dex:returnBalances:findUser:start");
     let userOpt = BalanceBook.firstNonControllerHolderAbove(dex.balances, key, dex.controller, fee);
+    Profile.mark("dex:Dex:returnBalances:findUser:end");
     switch (userOpt) {
       case null {
         let remaining = BalanceBook.total(dex.balances, key);
@@ -1124,7 +1137,10 @@ module {
     if (not LedgerSet.isActive(dex.ledgers, ledgerOut)) {
       return #err(#ledgerNotActive ledgerOut)
     };
-    PoolRegistry.quote(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut)
+    Profile.mark("dex:Dex:quote:pool:start");
+    let out = PoolRegistry.quote(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    Profile.mark("dex:Dex:quote:pool:end");
+    out
   };
 
   public func swap(
@@ -1179,7 +1195,10 @@ module {
     if (not LedgerSet.isActive(dex.ledgers, ledgerOut)) {
       return #err(#ledgerNotActive ledgerOut)
     };
-    switch (PoolRegistry.planSwap(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut)) {
+    Profile.mark("dex:Dex:swap:plan:start");
+    let swapPlan = PoolRegistry.planSwap(dex.pools, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    Profile.mark("dex:Dex:swap:plan:end");
+    switch (swapPlan) {
       case (#err err) { #err(err) };
       case (#ok plan) {
         let inputKey = AssetKey.ledger(ledgerIn);
@@ -1188,20 +1207,27 @@ module {
         if (BalanceBook.get(dex.balances, caller, inputKey) < amountIn) {
           #err(#insufficientLocalBalance)
         } else {
+          Profile.mark("dex:Dex:swap:debit:start");
           let debited = BalanceBook.debit(dex.balances, caller, inputKey, amountIn);
+          Profile.mark("dex:Dex:swap:debit:end");
           if (not debited) {
             return #err(#insufficientLocalBalance)
           };
           assert localBalance(dex, caller, inputKey) + amountIn == inputBalanceBefore;
-          switch (PoolRegistry.applySwap(dex.pools, plan)) {
+          Profile.mark("dex:Dex:swap:apply:start");
+          let applied = PoolRegistry.applySwap(dex.pools, plan);
+          Profile.mark("dex:Dex:swap:apply:end");
+          switch (applied) {
             case null {
               BalanceBook.credit(dex.balances, caller, inputKey, amountIn);
               assert localBalance(dex, caller, inputKey) == inputBalanceBefore;
               #err(#poolNotFound)
             };
             case (?receipt) {
+              Profile.mark("dex:Dex:swap:credit:start");
               BalanceBook.credit(dex.balances, caller, AssetKey.ledger(ledgerOut), receipt.amountOut);
               BalanceBook.credit(dex.balances, dex.controller, inputKey, receipt.platformFee);
+              Profile.mark("dex:Dex:swap:credit:end");
               #ok(receipt)
             }
           }
@@ -1309,14 +1335,17 @@ module {
         if (not LedgerSet.isActive(dex.ledgers, req.ledgerB)) {
           return #err(#ledgerNotActive(req.ledgerB))
         };
-        switch (PoolRegistry.planAdd(
+        Profile.mark("dex:Dex:liquidity:addPlan:start");
+        let addPlan = PoolRegistry.planAdd(
           dex.pools,
           req.ledgerA,
           req.ledgerB,
           req.maxAmountA,
           req.maxAmountB,
           req.minShares
-        )) {
+        );
+        Profile.mark("dex:Dex:liquidity:addPlan:end");
+        switch (addPlan) {
           case (#err err) { #err(err) };
           case (#ok plan) {
             assert plan.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB);
@@ -1330,6 +1359,7 @@ module {
             ) {
               #err(#insufficientLocalBalance)
             } else {
+              Profile.mark("dex:Dex:liquidity:addDebit:start");
               ignore BalanceBook.debit(dex.balances, caller, keyA, plan.usedA);
               if (
                 BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA)
@@ -1343,7 +1373,11 @@ module {
               ) {
                 assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore
               };
-              switch (PoolRegistry.applyAdd(dex.pools, plan)) {
+              Profile.mark("dex:Dex:liquidity:addDebit:end");
+              Profile.mark("dex:Dex:liquidity:addApply:start");
+              let addApplied = PoolRegistry.applyAdd(dex.pools, plan);
+              Profile.mark("dex:Dex:liquidity:addApply:end");
+              switch (addApplied) {
                 case null {
                   BalanceBook.credit(dex.balances, caller, keyA, plan.usedA);
                   BalanceBook.credit(dex.balances, caller, keyB, plan.usedB);
@@ -1356,7 +1390,9 @@ module {
                   #err(#poolNotFound)
                 };
                 case (?receipt) {
+                  Profile.mark("dex:Dex:liquidity:addCredit:start");
                   BalanceBook.credit(dex.balances, caller, plan.poolKey, plan.shares);
+                  Profile.mark("dex:Dex:liquidity:addCredit:end");
                   if (
                     BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyA) and
                     BalanceBook.recordKey(caller, plan.poolKey) != BalanceBook.recordKey(caller, keyB)
@@ -1384,14 +1420,17 @@ module {
         if (not LedgerSet.isListed(dex.ledgers, req.ledgerB)) {
           return #err(#ledgerNotWhitelisted(req.ledgerB))
         };
-        switch (PoolRegistry.planRemove(
+        Profile.mark("dex:Dex:liquidity:remPlan:start");
+        let removePlan = PoolRegistry.planRemove(
           dex.pools,
           req.ledgerA,
           req.ledgerB,
           req.shares,
           req.minAmountA,
           req.minAmountB
-        )) {
+        );
+        Profile.mark("dex:Dex:liquidity:remPlan:end");
+        switch (removePlan) {
           case (#err err) { #err(err) };
           case (#ok plan) {
             assert plan.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB);
@@ -1400,18 +1439,24 @@ module {
             if (BalanceBook.get(dex.balances, caller, plan.poolKey) < plan.shares) {
               #err(#insufficientLocalBalance)
             } else {
+              Profile.mark("dex:Dex:liquidity:remDebit:start");
               let debited = BalanceBook.debit(dex.balances, caller, plan.poolKey, plan.shares);
+              Profile.mark("dex:Dex:liquidity:remDebit:end");
               if (not debited) {
                 return #err(#insufficientLocalBalance)
               };
               assert localBalance(dex, caller, plan.poolKey) + plan.shares == poolBalanceBefore;
-              switch (PoolRegistry.applyRemove(dex.pools, plan)) {
+              Profile.mark("dex:Dex:liquidity:remApply:start");
+              let removeApplied = PoolRegistry.applyRemove(dex.pools, plan);
+              Profile.mark("dex:Dex:liquidity:remApply:end");
+              switch (removeApplied) {
                 case null {
                   BalanceBook.credit(dex.balances, caller, plan.poolKey, plan.shares);
                   assert localBalance(dex, caller, plan.poolKey) == poolBalanceBefore;
                   #err(#poolNotFound)
                 };
                 case (?receipt) {
+                  Profile.mark("dex:Dex:liquidity:remCredit:start");
                   BalanceBook.credit(dex.balances, caller, AssetKey.ledger(plan.ledgerA), plan.amountA);
                   if (
                     BalanceBook.recordKey(caller, plan.poolKey) !=
@@ -1428,6 +1473,7 @@ module {
                   ) {
                     assert localBalance(dex, caller, plan.poolKey) + plan.shares == poolBalanceBefore
                   };
+                  Profile.mark("dex:Dex:liquidity:remCredit:end");
                   #ok(#removed receipt)
                 }
               }

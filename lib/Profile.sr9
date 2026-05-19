@@ -1,0 +1,22 @@
+import Profiling "mo:core/Profiling";
+import ProfileConfig "./ProfileConfig";
+
+module {
+  public func mark(name : Text) : ()
+    requires true;
+    ensures true;
+  {
+    if (ProfileConfig.enabled) {
+      Profiling.mark(name)
+    }
+  };
+
+  public func markAsync(name : Text) : ()
+    requires true;
+    ensures true;
+  {
+    if (ProfileConfig.enabled) {
+      Profiling.markAsync(name)
+    }
+  };
+}

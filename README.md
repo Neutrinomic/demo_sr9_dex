@@ -11,10 +11,10 @@ to deploy with real user funds.
 
 ## Current Snapshot
 
-As of the latest full DEX2 gate on 2026-05-18:
+As of the latest full DEX gate on 2026-05-18:
 
-- Every active DEX2 source target in the verification table below passes.
-- The active `.sr9` DEX2 source contains no `trusted` functions.
+- Every active DEX source target in the verification table below passes.
+- The active `.sr9` DEX source contains no `trusted` functions.
 - The latest proof upgrade moves more conservation checking onto real `Dex`
   transitions: successful deposits, deposit prechecks, failed deposit cleanup,
   quote, and ledger add/retire/final-remove now have state-level observers for
@@ -128,7 +128,7 @@ The current verified surface includes these guarantees:
   tokens beyond the modeled ledger-fee behavior.
 - Attack observers cover bounded same-pool closed-loop action shapes through
   depth 6 for add/remove/swap receipt arithmetic.
-- The active DEX2 source has no `trusted` functions; the previous listing and
+- The active DEX source has no `trusted` functions; the previous listing and
   pool-removal proof cuts are now verified.
 - The current state-level conservation proof surface covers deposit success
   and failure paths, quote, and the ledger lifecycle. Swap/liquidity
@@ -193,7 +193,7 @@ postconditions, and record verifier limitations separately.
 ## Verification
 
 These timings were measured on 2026-05-18 in the SR9 workspace with the full
-DEX2 gate:
+DEX gate:
 
 ```bash
 JOBS=4 XDG_CACHE_HOME=/tmp/sector9 S9_VIPER_TIMING=1 ./scripts/run-op6-dex2-gate.sh

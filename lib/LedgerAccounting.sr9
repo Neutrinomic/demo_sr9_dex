@@ -1,4 +1,5 @@
 import BMap "mo:core/pure/BMap";
+import Profile "./Profile";
 import Text "mo:core/Text";
 
 module {
@@ -103,14 +104,17 @@ module {
     ensures old(settled(accounting, ledgerKey)) ==>
       net(accounting, ledgerKey) == old(net(accounting, ledgerKey)) + amount;
   {
+    Profile.mark("dex:LedgerAccounting:recordDeposit:start");
     if (amount == 0) {
+      Profile.mark("dex:LedgerAccounting:recordDeposit:end");
       return
     };
     let current = mapGet(accounting.inflows, ledgerKey);
     assert BMap.orderedBy<Text, Nat>(accounting.inflows, Text.compare);
     let nextInflows = BMap.add<Text, Nat>(accounting.inflows, Text.compare, ledgerKey, current + amount);
     assert BMap.orderedBy<Text, Nat>(nextInflows, Text.compare);
-    accounting.inflows := nextInflows
+    accounting.inflows := nextInflows;
+    Profile.mark("dex:LedgerAccounting:recordDeposit:end")
   };
 
   public func recordWithdraw(accounting : LedgerAccounting, ledgerKey : Text, debitAmount : Nat) : ()
@@ -122,14 +126,17 @@ module {
     ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + debitAmount ==>
       net(accounting, ledgerKey) + debitAmount == old(net(accounting, ledgerKey));
   {
+    Profile.mark("dex:LedgerAccounting:recordWithdraw:start");
     if (debitAmount == 0) {
+      Profile.mark("dex:LedgerAccounting:recordWithdraw:end");
       return
     };
     let current = mapGet(accounting.outflows, ledgerKey);
     assert BMap.orderedBy<Text, Nat>(accounting.outflows, Text.compare);
     let nextOutflows = BMap.add<Text, Nat>(accounting.outflows, Text.compare, ledgerKey, current + debitAmount);
     assert BMap.orderedBy<Text, Nat>(nextOutflows, Text.compare);
-    accounting.outflows := nextOutflows
+    accounting.outflows := nextOutflows;
+    Profile.mark("dex:LedgerAccounting:recordWithdraw:end")
   };
 
   public func recordForcedReturn(accounting : LedgerAccounting, ledgerKey : Text, localBalance : Nat) : ()
@@ -141,13 +148,16 @@ module {
     ensures old(inflowValue(accounting, ledgerKey)) >= old(outflowValue(accounting, ledgerKey)) + localBalance ==>
       net(accounting, ledgerKey) + localBalance == old(net(accounting, ledgerKey));
   {
+    Profile.mark("dex:LedgerAccounting:recordForcedReturn:start");
     if (localBalance == 0) {
+      Profile.mark("dex:LedgerAccounting:recordForcedReturn:end");
       return
     };
     let current = mapGet(accounting.outflows, ledgerKey);
     assert BMap.orderedBy<Text, Nat>(accounting.outflows, Text.compare);
     let nextOutflows = BMap.add<Text, Nat>(accounting.outflows, Text.compare, ledgerKey, current + localBalance);
     assert BMap.orderedBy<Text, Nat>(nextOutflows, Text.compare);
-    accounting.outflows := nextOutflows
+    accounting.outflows := nextOutflows;
+    Profile.mark("dex:LedgerAccounting:recordForcedReturn:end")
   };
 }

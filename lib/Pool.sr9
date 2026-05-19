@@ -1,4 +1,5 @@
 import AmmMath "./AmmMath";
+import Profile "./Profile";
 import Types "./Types";
 
 module {
@@ -110,7 +111,8 @@ module {
     ensures result.totalShares > 0 ==> result.reserveB > 0;
     ensures model(pool) == old(model(pool));
   {
-    {
+    Profile.mark("dex:Pool:info:start");
+    let out = {
       id = pool.id;
       key = pool.key;
       ledgerA = pool.ledgerA;
@@ -119,7 +121,9 @@ module {
       reserveB = pool.reserveB;
       totalShares = pool.totalShares;
       lockedShares = pool.lockedShares
-    }
+    };
+    Profile.mark("dex:Pool:info:end");
+    out
   };
 
   public pure func containsLedger(pool : Pool, ledger : Principal) : Bool
@@ -169,16 +173,22 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:Pool:quoteExactIn:start");
     switch (inputIsA(pool, ledgerIn, ledgerOut)) {
-      case null { #err(#poolNotFound) };
+      case null {
+        Profile.mark("dex:Pool:quoteExactIn:end");
+        #err(#poolNotFound)
+      };
       case (?inA) {
         let reserveIn = if (inA) { pool.reserveA } else { pool.reserveB };
         let reserveOut = if (inA) { pool.reserveB } else { pool.reserveA };
         if (pool.totalShares == 0 or reserveIn == 0 or reserveOut == 0) {
+          Profile.mark("dex:Pool:quoteExactIn:end");
           return #err(#insufficientLiquidity)
         };
         let fees = AmmMath.splitFees(amountIn);
         let out = AmmMath.quoteExactIn(reserveIn, reserveOut, fees.effectiveAmountIn);
+        Profile.mark("dex:Pool:quoteExactIn:end");
         #ok({
           ledgerIn = ledgerIn;
           ledgerOut = ledgerOut;
@@ -227,22 +237,30 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:Pool:planSwap:start");
     switch (inputIsA(pool, ledgerIn, ledgerOut)) {
-      case null { #err(#poolNotFound) };
+      case null {
+        Profile.mark("dex:Pool:planSwap:end");
+        #err(#poolNotFound)
+      };
       case (?inA) {
         let reserveIn = if (inA) { pool.reserveA } else { pool.reserveB };
         let reserveOut = if (inA) { pool.reserveB } else { pool.reserveA };
         if (pool.totalShares == 0 or reserveIn == 0 or reserveOut == 0) {
+          Profile.mark("dex:Pool:planSwap:end");
           return #err(#insufficientLiquidity)
         };
         let fees = AmmMath.splitFees(amountIn);
         let out = AmmMath.quoteExactIn(reserveIn, reserveOut, fees.effectiveAmountIn);
         if (out == 0 or out >= reserveOut) {
+          Profile.mark("dex:Pool:planSwap:end");
           return #err(#insufficientLiquidity)
         };
         if (out < minAmountOut) {
+          Profile.mark("dex:Pool:planSwap:end");
           return #err(#slippage)
         };
+        Profile.mark("dex:Pool:planSwap:end");
         #ok({
           poolKey = pool.key;
           ledgerIn = ledgerIn;
@@ -305,6 +323,7 @@ module {
       }
     };
   {
+    Profile.mark("dex:Pool:applySwap:start");
     let reserveDelta = plan.effectiveAmountIn + plan.lpFee;
     let currentReserveIn = if (plan.inputIsA) { pool.reserveA } else { pool.reserveB };
     let currentReserveOut = if (plan.inputIsA) { pool.reserveB } else { pool.reserveA };
@@ -312,16 +331,19 @@ module {
       currentReserveIn != plan.reserveInBefore or
       currentReserveOut != plan.reserveOutBefore
     ) {
+      Profile.mark("dex:Pool:applySwap:end");
       return null
     };
     if (plan.inputIsA) {
       if (plan.amountOut >= pool.reserveB) {
+        Profile.mark("dex:Pool:applySwap:end");
         return null
       };
       pool.reserveA += reserveDelta;
       pool.reserveB -= plan.amountOut;
       assert pool.reserveA == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee;
       assert pool.reserveB + plan.amountOut == plan.reserveOutBefore;
+      Profile.mark("dex:Pool:applySwap:end");
       ?{
         ledgerIn = plan.ledgerIn;
         ledgerOut = plan.ledgerOut;
@@ -339,12 +361,14 @@ module {
       }
     } else {
       if (plan.amountOut >= pool.reserveA) {
+        Profile.mark("dex:Pool:applySwap:end");
         return null
       };
       pool.reserveB += reserveDelta;
       pool.reserveA -= plan.amountOut;
       assert pool.reserveB == plan.reserveInBefore + plan.effectiveAmountIn + plan.lpFee;
       assert pool.reserveA + plan.amountOut == plan.reserveOutBefore;
+      Profile.mark("dex:Pool:applySwap:end");
       ?{
         ledgerIn = plan.ledgerIn;
         ledgerOut = plan.ledgerOut;
@@ -400,7 +424,9 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:Pool:planAdd:start");
     if (maxAmountA == 0 or maxAmountB == 0) {
+      Profile.mark("dex:Pool:planAdd:end");
       return #err(#zeroAmount)
     };
     let planned = if (pool.totalShares == 0) {
@@ -416,8 +442,12 @@ module {
       )
     };
     switch (planned) {
-      case null { #err(#insufficientLiquidity) };
+      case null {
+        Profile.mark("dex:Pool:planAdd:end");
+        #err(#insufficientLiquidity)
+      };
       case (?p) {
+        Profile.mark("dex:Pool:planAdd:end");
         #ok({
           poolKey = pool.key;
           ledgerA = pool.ledgerA;
@@ -456,11 +486,12 @@ module {
     ensures totalShares(pool) == old(totalShares(pool)) + plan.shares + plan.lockedSharesAdded;
     ensures lockedShares(pool) == old(lockedShares(pool)) + plan.lockedSharesAdded;
   {
+    Profile.mark("dex:Pool:applyAdd:start");
     pool.reserveA += plan.usedA;
     pool.reserveB += plan.usedB;
     pool.totalShares += plan.shares + plan.lockedSharesAdded;
     pool.lockedShares += plan.lockedSharesAdded;
-    {
+    let out = {
       ledgerA = pool.ledgerA;
       ledgerB = pool.ledgerB;
       usedA = plan.usedA;
@@ -470,7 +501,9 @@ module {
       shares = plan.shares;
       lockedShares = plan.lockedSharesAdded;
       poolKey = pool.key
-    }
+    };
+    Profile.mark("dex:Pool:applyAdd:end");
+    out
   };
 
   public func planRemove(
@@ -502,7 +535,9 @@ module {
       case (#err(_)) { true }
     };
   {
+    Profile.mark("dex:Pool:planRemove:start");
     if (shares == 0) {
+      Profile.mark("dex:Pool:planRemove:end");
       return #err(#zeroAmount)
     };
     if (
@@ -510,13 +545,16 @@ module {
       shares > pool.totalShares or
       shares + pool.lockedShares > pool.totalShares
     ) {
+      Profile.mark("dex:Pool:planRemove:end");
       return #err(#insufficientLiquidity)
     };
     let amountA = (shares * pool.reserveA) / pool.totalShares;
     let amountB = (shares * pool.reserveB) / pool.totalShares;
     if (amountA < minAmountA or amountB < minAmountB) {
+      Profile.mark("dex:Pool:planRemove:end");
       return #err(#slippage)
     };
+    Profile.mark("dex:Pool:planRemove:end");
     #ok({
       poolKey = pool.key;
       ledgerA = pool.ledgerA;
@@ -561,12 +599,14 @@ module {
       }
     };
   {
+    Profile.mark("dex:Pool:applyRemove:start");
     if (
       plan.amountA > pool.reserveA or
       plan.amountB > pool.reserveB or
       plan.shares > pool.totalShares or
       plan.shares + pool.lockedShares > pool.totalShares
     ) {
+      Profile.mark("dex:Pool:applyRemove:end");
       return null
     };
     let remainingShares = pool.totalShares - plan.shares;
@@ -574,17 +614,20 @@ module {
       remainingShares > 0 and
       (plan.amountA >= pool.reserveA or plan.amountB >= pool.reserveB)
     ) {
+      Profile.mark("dex:Pool:applyRemove:end");
       return null
     };
     if (
       remainingShares == 0 and
       (plan.amountA != pool.reserveA or plan.amountB != pool.reserveB)
     ) {
+      Profile.mark("dex:Pool:applyRemove:end");
       return null
     };
     pool.reserveA -= plan.amountA;
     pool.reserveB -= plan.amountB;
     pool.totalShares -= plan.shares;
+    Profile.mark("dex:Pool:applyRemove:end");
     ?{
       ledgerA = pool.ledgerA;
       ledgerB = pool.ledgerB;
