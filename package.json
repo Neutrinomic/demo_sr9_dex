@@ -1,0 +1,28 @@
+{
+  "name": "sr9-reference-implementations",
+  "private": true,
+  "type": "module",
+  "trustedDependencies": ["@dfinity/pic"],
+  "scripts": {
+    "build:actors": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/scripts/buildActorFixture.ts --all",
+    "build:dex": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/scripts/buildActorFixture.ts dex",
+    "compile": "bun run build:actors",
+    "test": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/runner/runE2E.ts",
+    "test:dex": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/runner/runE2E.ts",
+    "test:slow": "E2E_CONFIG=standard_icrc/dex/test/config.json E2E_INCLUDE_SLOW=1 E2E_TIMEOUT_MS=1800000 bun run shared/harness/runner/runE2E.ts",
+    "test:raw": "bun test --timeout 240000 standard_icrc/dex/test/spec/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^3.4.3",
+    "@dfinity/candid": "^2.0.0",
+    "@dfinity/pic": "^0.18.0",
+    "@dfinity/principal": "^2.0.0",
+    "@icp-sdk/core": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^6.0.3",
+    "wabt": "^1.0.39"
+  }
+}

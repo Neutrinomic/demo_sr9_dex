@@ -1,0 +1,28 @@
+{
+  "workspaceRoot": "../../..",
+  "actorFixturesDir": "fixtures/actors",
+  "defaultActor": "dex",
+  "test": {
+    "specGlob": "spec/**/*.test.ts",
+    "timeoutMs": 240000,
+    "reportsDir": "reports",
+    "exceptionsFile": "exceptions.ts"
+  },
+  "actors": {
+    "dex": {
+      "name": "DexActorDemo",
+      "source": "../DexActorDemo.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        {
+          "name": "core",
+          "path": "core/src",
+          "env": "CORE_PACKAGE_PATH",
+          "findUp": true,
+          "bundledFallback": true
+        }
+      ]
+    }
+  }
+}
