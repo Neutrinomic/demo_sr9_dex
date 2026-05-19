@@ -225,6 +225,39 @@ target currently verifies.
 | `proofs/AttackObservers.sr9` | PASS | 1.252 |
 | `DexActorDemo.sr9` | PASS | 235.575 |
 
+## Runtime E2E Tests
+
+The repository also includes a standalone PocketIC test harness under
+`test_e2e/`. These tests are not a replacement for SR9 proofs; they are a
+black-box adversarial runtime check that assumes bugs may still exist.
+
+The default E2E run currently covers 28 suites and 61 tests across controller
+access, ledger lifecycle, deposits, withdrawals, failed ledger calls, swaps,
+slippage, fee distribution, LP share behavior, pool removal, user views,
+retirement returns, dust abandon, stopped-ledger recovery, standard-ledger
+duplicate/time errors, seeded randomized actions, allowance replay attempts,
+concurrent withdraw attempts, canonical reversed-ledger paths, rounding
+attacks, and theft-style negative cases. The scenario harness keeps an
+off-chain oracle for local balances, LP
+virtual balances, pool reserves, shares, controller fees, abandoned dust, and
+real ICRC balances held by the DEX canister.
+
+```bash
+cd test_e2e
+bun install
+bun run typecheck
+bun run test
+```
+
+The large population stress suite is separate from the default run:
+
+```bash
+bun run test:slow
+```
+
+By default that slow suite uses 20 ledgers, 50 pools, 5000 users, and 20000
+mixed actions.
+
 ## Development Rule
 
 Any change to the DEX logic should keep the full table green. If a verifier

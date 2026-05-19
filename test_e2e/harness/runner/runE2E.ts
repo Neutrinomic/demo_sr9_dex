@@ -137,8 +137,12 @@ function prepareRun(reportsDir: string): RunPaths {
 }
 
 function discoverSpecs(args: string[], specGlob: string): string[] {
+  const includeSlow =
+    process.env.E2E_INCLUDE_SLOW === "1" ||
+    process.env.E2E_INCLUDE_SLOW === "true";
   const all = listFiles(resolve(E2E_DIR, "spec"))
     .filter((file) => file.endsWith(".test.ts"))
+    .filter((file) => includeSlow || !basename(file).includes(".slow."))
     .sort();
   if (args.length === 0) {
     return all;

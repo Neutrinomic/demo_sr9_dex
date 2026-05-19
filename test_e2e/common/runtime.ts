@@ -465,7 +465,7 @@ export function variantKey(value: unknown): string {
 
 export function unwrapVariant<T = unknown>(value: unknown, key: string): T {
   if (variantKey(value) !== key) {
-    throw new Error(`expected #${key}, got ${JSON.stringify(value)}`);
+    throw new Error(`expected #${key}, got ${stringifyCandid(value)}`);
   }
   return (value as Record<string, T>)[key];
 }
@@ -476,4 +476,10 @@ export function unwrapOk<T = unknown>(value: unknown): T {
 
 export function unwrapIcrcOk<T = unknown>(value: unknown): T {
   return unwrapVariant<T>(value, "Ok");
+}
+
+function stringifyCandid(value: unknown): string {
+  return JSON.stringify(value, (_key, item) =>
+    typeof item === "bigint" ? item.toString() : item,
+  );
 }

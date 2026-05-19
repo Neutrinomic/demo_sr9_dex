@@ -20,6 +20,22 @@ bun run typecheck
 bun run test
 ```
 
+`bun run test` runs the normal security and regression suites. The exact large
+population stress case is intentionally excluded from default runs. Use the
+slow command when you want the full 20-ledger, 50-pool, 5000-user workload:
+
+```bash
+bun run test:slow
+```
+
+For quick validation of the slow path, override the scale:
+
+```bash
+E2E_INCLUDE_SLOW=1 E2E_STRESS_LEDGERS=3 E2E_STRESS_POOLS=3 \
+E2E_STRESS_USERS=8 E2E_STRESS_ACTIONS=20 \
+bun run harness/runner/runE2E.ts large_population
+```
+
 The tests deploy checked-in runtime fixtures for the DEX and ICRC ledger, so
 they do not need the SR9 monorepo test runner, compiler cache, or package
 layout.
@@ -37,6 +53,7 @@ which is also what VS Code should pick up for files under this folder. `bun run
 test` intentionally does not compile. It runs the quiet e2e runner, which
 executes matching specs in parallel, captures each spec's stdout/stderr into
 report logs, writes JUnit internally, and prints only a final summary.
+`test:slow` sets `E2E_INCLUDE_SLOW=1` and a larger timeout.
 `bun run test:raw` runs Bun directly when you need interactive test output.
 `bun run build:actors` builds every actor listed in `config.json`. `bun run
 build:dex` only rebuilds the DEX actor.
@@ -70,8 +87,25 @@ Actor-specific build settings live in `config.json`: source path, optional
 fixture directory, output basename, cycles, compiler flags, and package roots.
 By default, actor fixtures go to `fixtures/actors/<actor-key>/`. Actor-specific
 deploy helpers should live beside that actor's generated WASM and DID files.
-Scenario setup belongs in specs or shared test helpers under `common/`; the
-files under `harness/` should not need project edits.
+Scenario setup belongs in specs or shared app-specific test helpers such as
+`spec/support/`; the files under `harness/` should not need project edits.
+
+The DEX-specific scenario helper keeps an off-chain oracle for user local
+balances, LP virtual balances, pool reserves, total shares, locked shares,
+controller fee balances, abandoned dust, and the DEX canister's real ICRC
+ledger balances. The security suites assert that oracle after every meaningful
+action, with full external-ledger checks at checkpoints in large randomized
+runs.
+
+The normal suite currently covers 28 suites and 61 tests across controller
+access, ledger allowlisting and retirement, deposit and withdrawal round trips,
+failed ledger calls, quote/swap behavior, slippage, fee distribution, LP share
+mint/burn behavior, pool removal, balance/pool views, dust abandon,
+stopped-ledger recovery, standard-ledger duplicate/time errors, seeded
+randomized actions, allowance replay attempts, concurrent withdraw attempts,
+canonical reversed-ledger paths, rounding attacks, and theft-style negative
+cases. The slow suite scales the same harness to 20 ledgers, 50 pools, 5000
+users, and many mixed actions.
 
 Runtime reports are written under `reports/runs/<timestamp>/` and stable latest
 copies are kept at `reports/latest-test-results.md` and

@@ -53,7 +53,10 @@ export function testConfig(): Required<TestConfig> {
   const test = loadConfig().test ?? {};
   return {
     specGlob: test.specGlob ?? "spec/**/*.test.ts",
-    timeoutMs: test.timeoutMs ?? 240_000,
+    timeoutMs:
+      Number.parseInt(process.env.E2E_TIMEOUT_MS ?? "", 10) ||
+      test.timeoutMs ||
+      240_000,
     jobs:
       Number.parseInt(process.env.E2E_JOBS ?? "", 10) ||
       test.jobs ||

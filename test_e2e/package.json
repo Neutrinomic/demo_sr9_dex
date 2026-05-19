@@ -8,6 +8,7 @@
     "build:dex": "bun run harness/scripts/buildActorFixture.ts dex",
     "compile": "bun run build:actors",
     "test": "bun run harness/runner/runE2E.ts",
+    "test:slow": "E2E_INCLUDE_SLOW=1 E2E_TIMEOUT_MS=1800000 bun run harness/runner/runE2E.ts",
     "test:raw": "bun test --timeout 240000 spec/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
