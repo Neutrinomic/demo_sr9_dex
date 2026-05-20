@@ -26,6 +26,9 @@ The current tree is organized around protocol families:
   stay at the boundary while protocol logic runs against local state.
 - `hmt/` is a placeholder for protocols that will use HMT, the Hash Module
   Tokens inter-canister asset system. More examples will be added there soon.
+- `spi/` contains SR9 Protocol Interface modules and notes. It is wired as an
+  SR9 package so projects can import shared interfaces and helpers with paths
+  like `mo:spi/100/VirtualPrincipal`.
 - `shared/` contains reusable PocketIC and TypeScript test harness code for the
   projects in this repository.
 

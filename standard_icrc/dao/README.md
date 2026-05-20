@@ -5,10 +5,12 @@ This is a standalone DAO demo written in Sector9.
 ## Executive Summary
 
 This DAO holds real ICRC governance tokens in the DAO canister account and
-tracks each user's deposited balance locally. Users deposit through ICRC-2,
-stake deposited tokens, wait 7 days for voting power to mature, and then create
-or vote on governance proposals. Up to 32 proposals can be created in this
-bounded demo, and they can be open or passed at the same time.
+tracks each subject's deposited balance locally. A subject can be a direct
+principal or an SPI-100 virtual principal controlled by the caller. Users
+deposit through the SPI-101 ICRC-2 flow, stake deposited tokens, wait 7 days for
+voting power to mature, and then create or vote on governance proposals. Up to
+32 proposals can be created in this bounded demo, and they can be open or
+passed at the same time.
 Creating a proposal reserves a bond equal to the current proposal threshold from
 the proposer's active stake; failed proposals slash that bond from local DAO
 accounting, and passed proposals return it when executed. Voting uses mature
@@ -16,16 +18,17 @@ active stake, and stake used to vote remains locked from unstaking while any
 voted proposal is open. Proposal bonds cannot reuse stake that is already
 needed by an open-vote lock.
 
-Withdrawals send real tokens back through ICRC-1. The DAO moves `amount + fee`
-into pending withdrawal state before the ledger transfer, finalizes on success,
-refunds only deterministic non-execution errors, and leaves ambiguous outcomes
-pending for retry or reconciliation. A separate `WithdrawalOps` module stores
-the retry operation data so the same memo and `created_at_time` can be
-resubmitted.
+Withdrawals send real tokens back through the SPI-101 ICRC-1 flow. The DAO
+moves `amount + fee` into pending withdrawal state before the ledger transfer,
+finalizes on success, and restores the pending debit on ledger errors or ledger
+call rejects under the SPI-101 guaranteed-response model. A separate
+`WithdrawalOps` module keeps the one-in-flight-withdrawal guard outside the main
+DAO accounting state.
 
 The checked core preserves local accounting conservation, stake and unstake
 movement, voting-lock behavior, proposal deadlines, config bounds, bounded
-proposal storage, config-version sequencing, and withdrawal retry bookkeeping.
+proposal storage, config-version sequencing, and withdrawal pending-state
+bookkeeping.
 Scalar proposal lifecycle rules, the DEX-style multi-proposal book, the DAO
 accounting module, and the withdrawal-operation module verify independently. The
 remaining production assumptions are operational: the configured governance
@@ -42,16 +45,23 @@ this demo.
 - `initialProposalThreshold`
 
 There is no initial token allocation. The DAO starts with zero accounted tokens.
-Users bring real governance tokens into the DAO with `deposit(amount)`.
+Users bring real governance tokens into the DAO with the SPI-101 deposit flow:
+`spi_101_deposit({ subject; ledger; from; amount })`.
+
+The `subject` is the local DAO account owner. It can be the caller's direct
+principal or an SPI-100 virtual principal controlled by the caller. This lets a
+canister or other short principal safely partition DAO balances and governance
+state into multiple local accounts without a stateful registry.
 
 Deposits use ICRC-2:
 
 - The user first approves the DAO canister on the `governanceLedger`.
-- `deposit(amount)` calls `icrc2_transfer_from`.
+- `spi_101_deposit` calls `icrc2_transfer_from`.
+- The governance ledger is the only supported external ledger.
 - Each deposit call includes a DAO operation memo and `created_at_time`.
-- Tokens are pulled from the caller's default account into the DAO canister's
-  default account.
-- The caller's DAO liquid balance is credited only after the ledger returns
+- Tokens are pulled from `request.from` into the DAO canister's default
+  account. `request.from.owner` must equal the caller.
+- The subject's DAO liquid balance is credited only after the ledger returns
   `#Ok(txIndex)`.
 - A duplicate ledger response is not credited without a matching local deposit
   operation record.
@@ -59,39 +69,40 @@ Deposits use ICRC-2:
 
 Withdrawals use ICRC-1:
 
-- `withdraw(amount)` can spend only liquid DAO balance.
+- `spi_101_withdraw({ subject; ledger; to; amount })` can spend only the
+  subject's liquid DAO balance.
+- The governance ledger is the only supported external ledger.
 - The actor queries `icrc1_fee()`.
 - The DAO debits `amount + fee` into a pending withdrawal before the transfer.
 - The in-flight withdrawal call includes a DAO operation memo and
   `created_at_time`.
-- The actor calls `icrc1_transfer` to the caller's default account.
+- The actor calls `icrc1_transfer` to `request.to`, including its optional
+  subaccount.
 - On success, the pending debit is finalized.
 - A duplicate ledger response is treated as success using the duplicate
   transaction index.
-- Ledger errors that prove the transfer did not execute restore the full
-  pending debit to liquid.
-- Ambiguous ledger errors or call rejects leave the debit pending and return a
-  reconciliation-required error instead of refunding locally.
+- Ledger errors and ledger call rejects restore the full pending debit to
+  liquid under the SPI-101 guaranteed-response model.
 - `WithdrawalOps` stores the withdrawal operation id, memo timestamp, amount,
   fee, and debit separately from the main DAO state.
-- `pending_withdrawal(user)` exposes the pending operation, and
-  `retry_withdrawal()` resubmits the same memo and `created_at_time`.
 - A user can have only one pending withdrawal operation at a time.
 
 Voting power still requires staking:
 
-- `stake(amount)` moves liquid deposited tokens into active stake.
-- Staked tokens cannot vote immediately. `stake(amount)` sets the caller's
+- `stake(subject, amount)` moves liquid deposited tokens into active stake.
+- Staked tokens cannot vote immediately. `stake(subject, amount)` sets the subject's
   `votingPowerUnlockAt` to `now + 7 days`.
-- `create_proposal(action)` and `vote(id, choice)` both require the caller's
+- `create_proposal(subject, action)` and `vote(subject, id, choice)` both
+  require the subject's
   active stake lock to be mature.
 - `voting_power(user)` returns mature active stake and reports `0` while the
   7-day voting lock is active; `stake_info(user)` includes
   `votingPowerUnlockAt`.
-- `request_unstake(amount)` removes voting power immediately and starts the
-  7-day cooldown, except stake already used to vote stays locked while any
-  voted proposal is open.
-- `claim_unstaked()` moves matured pending unstake back to liquid balance.
+- `request_unstake(subject, amount)` removes voting power immediately and
+  starts the 7-day cooldown, except stake already used to vote stays locked
+  while any voted proposal is open.
+- `claim_unstaked(subject)` moves matured pending unstake back to liquid
+  balance.
 - Only claimed liquid balance can be withdrawn.
 
 The 7-day cooldown is:
@@ -105,12 +116,13 @@ are normalized to `1`. Governance config actions must keep both values nonzero
 and no larger than the DAO's current accounted token supply when the proposal is
 created.
 
-Proposals have a fixed 3-day voting period. `create_proposal(action)` stores
-the creation time and deadline, `vote(id, choice)` rejects once that deadline
-has been reached, and `close(id)` rejects attempts before the deadline. A
-proposal passes only when yes votes exceed no votes, configured quorum is met,
-and participation is strictly more than 3% of the proposal's snapshot active
-stake. Otherwise close marks it failed and burns the reserved bond locally.
+Proposals have a fixed 3-day voting period.
+`create_proposal(subject, action)` stores the creation time and deadline,
+`vote(subject, id, choice)` rejects once that deadline has been reached, and
+`close(id)` rejects attempts before the deadline. A proposal passes only when
+yes votes exceed no votes, configured quorum is met, and participation is
+strictly more than 3% of the proposal's snapshot active stake. Otherwise close
+marks it failed and burns the reserved bond locally.
 
 Each proposal captures the current `configVersion` at creation. Execution
 applies a passed proposal only if that version still matches the DAO's current
@@ -136,14 +148,14 @@ previously valid passed proposal unexecutable.
 - `pending_withdrawal(user)`
 - `proposal(id)`
 - `vote_info(id, user)`
-- `deposit(amount)`
-- `withdraw(amount)`
-- `retry_withdrawal()`
-- `stake(amount)`
-- `request_unstake(amount)`
-- `claim_unstaked()`
-- `create_proposal(action)`
-- `vote(id, choice)`
+- `spi_101_deposit(request)`
+- `spi_101_withdraw(request)`
+- `spi_101_balance(request)`
+- `stake(subject, amount)`
+- `request_unstake(subject, amount)`
+- `claim_unstaked(subject)`
+- `create_proposal(subject, action)`
+- `vote(subject, id, choice)`
 - `close(id)`
 - `execute(id)`
 
@@ -184,30 +196,29 @@ The verified and checked contracts cover:
 - withdrawal operation initialization starts with zero pending withdrawal amount
 - successful deposits increase local accounted tokens and liquid balance
 - deposit ledger arguments are constructed so `icrc2_transfer_from` pulls from
-  the caller's default account into the DAO canister's default account and
+  the requested ICRC account into the DAO canister's default account and
   includes a non-null memo and `created_at_time`
 - deposit ledger errors/rejects, including duplicate responses, preserve local
   accounting
 - withdrawal begin moves `amount + fee` from liquid into pending withdrawal
 - withdrawal ledger arguments are constructed so `icrc1_transfer` sends to the
-  caller's default account, with no source subaccount, and includes the pending
+  requested ICRC account, with no source subaccount, and includes the pending
   withdrawal memo and `created_at_time`
 - withdrawal success settles the pending debit and reduces accounted tokens
-- deterministic withdrawal errors restore the pending debit to liquid
-- ambiguous withdrawal errors/rejects preserve the pending debit instead of
-  refunding locally
-- withdrawal retry starts are read-only and return the stored operation id,
-  amount, fee, debit, and `created_at_time`
+- ledger transfer errors and ledger call rejects restore the pending debit to
+  liquid under the SPI-101 guaranteed-response model
+- pending withdrawal metadata exposes the stored operation id, amount, fee,
+  debit, and `created_at_time`
 - clearing a withdrawal operation decreases the pending withdrawal-operation
   total by exactly that debit
 - withdrawal never decreases active stake or pending unstake, so locked voting
   tokens cannot be withdrawn around the 7-day lock
 - staking preserves the local accounted token total
-- successful staking decreases the caller's liquid balance by exactly `amount`
+- successful staking decreases the subject's liquid balance by exactly `amount`
   and increases active stake by exactly `amount`
-- successful staking sets the caller's voting unlock time to exactly
+- successful staking sets the subject's voting unlock time to exactly
   `now + 7 days`
-- eligible voting power is zero before the caller's voting unlock time and
+- eligible voting power is zero before the subject's voting unlock time and
   equals active stake after it
 - successful proposal creation and successful voting prove
   `now >= votingPowerUnlockAt`
@@ -216,7 +227,7 @@ The verified and checked contracts cover:
 - successful unstake requests set the unlock time to exactly `now + 7 days`
 - claims move matured pending unstake back to liquid
 - successful claims move exactly the matured pending-unstake amount into liquid
-  and clear the caller's pending unstake
+  and clear the subject's pending unstake
 - scalar proposal creation stores the creation time and a deadline exactly
   3 days later
 - voting rejects at or after the stored proposal deadline
@@ -351,8 +362,8 @@ The runtime suites cover:
   and execute
 - deposit security: no local credit on failed or rejected ledger transfer-from
   paths
-- withdrawal security: local debit before transfer, deterministic refund,
-  ambiguous pending state, retry, and stopped-ledger fee failure behavior
+- withdrawal security: local debit before transfer, transfer-error/reject
+  refund, one-operation pending guard, and stopped-ledger fee failure behavior
 - staking locks: voting-power maturity, cooldowns, one pending unstake,
   multi-proposal vote locks, and proposal-bond rejection when stake is already
   backing an open vote
@@ -363,6 +374,9 @@ The runtime suites cover:
 - liveness probes: withdrawals cannot invalidate already-passed config
   proposals, and stale passed proposals settle without overwriting newer
   executed config
+- SPI compliance: SPI-101 deposit/withdraw/balance, SPI-100 delegated subjects,
+  ICRC subaccount withdrawal targets, unauthorized delegated-subject access, and
+  virtual-ledger rejection
 - edge-case probes: stale settlement cannot be replayed for a second bond
   return, new proposals capture the latest config version after stale
   settlement, threshold updates control future proposal bonds, failed bond burns
@@ -389,9 +403,9 @@ The runtime suites cover:
 ## Current Limits
 
 - One governance ledger per DAO instance.
-- Default accounts only; no subaccount selection.
+- SPI-101 supports ICRC subaccounts for deposit sources and withdrawal targets.
 - No token transfers between DAO users.
-- Adding more stake resets the caller's active-stake voting unlock time.
+- Adding more stake resets the subject's active-stake voting unlock time.
 - No abstain vote and no vote replacement.
 - No early close when an outcome is mathematically final; close is deadline-only.
 - Proposal capacity is fixed at 32 lifetime proposals; the 33rd creation

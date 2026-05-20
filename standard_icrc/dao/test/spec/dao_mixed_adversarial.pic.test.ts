@@ -40,8 +40,8 @@ describe("dao mixed adversarial flows", () => {
     unwrapOk(await vote(env, env.bob, created.id, { no: null }));
 
     expectErrKey(await requestUnstake(env, env.bob, 1n), "stakeLockedForVote");
-    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLiquidBalance");
-    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLocalBalance");
+    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLocalBalance");
 
     await setTimeNanos(env, created.deadline);
     const closed = unwrapOk<any>(await env.dao.actor.close(created.id));

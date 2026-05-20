@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { stopPocketIcServer } from "../../../../shared/common/runtime.ts";
 import {
   createDexScenario,
+  dexBalanceEntries,
   expectErr,
   expectOk,
   type DexScenario,
@@ -63,7 +64,7 @@ describe("ledger allowlist lifecycle", () => {
     expectOk(await s.removeLedger(0));
 
     expectOk(await s.whitelistLedger(0));
-    expect(await s.dex.actor.balances(s.users[0].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[0].getPrincipal())).toEqual([]);
     expectOk(await s.approveAndDeposit(0, 0, 30_000n));
     await s.assertAll();
   });

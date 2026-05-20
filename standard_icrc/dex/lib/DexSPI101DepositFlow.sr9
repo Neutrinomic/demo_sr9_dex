@@ -1,0 +1,87 @@
+import Dex "./Dex";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import SPI101 "mo:spi/101/DepositWithdrawBalance";
+import SPI101Adapter "./SPI101Adapter";
+import Types "./Types";
+
+module {
+  public func start(
+    dex : Dex.State,
+    controller : Principal,
+    caller : Principal,
+    request : SPI101.DepositRequest
+  ) : SPI101.Result<(), SPI101.DepositError>
+    modifies dex
+    requires Dex.controllerOf(dex) == controller;
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    switch (SPI101Adapter.depositPreError(caller, request)) {
+      case (?err) { return #err(err) };
+      case null {}
+    };
+    switch (Dex.beginDeposit(dex, request.ledger, request.amount)) {
+      case (#ok ok) { #ok(ok) };
+      case (#err err) { #err(SPI101Adapter.depositError(err)) }
+    }
+  };
+
+  public func finishOk(
+    dex : Dex.State,
+    controller : Principal,
+    request : SPI101.DepositRequest,
+    txIndex : Nat
+  ) : SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError>
+    modifies dex
+    requires Dex.controllerOf(dex) == controller;
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    let finish = Dex.finishDepositOk(
+      dex,
+      request.subject,
+      request.ledger,
+      request.amount,
+      txIndex
+    );
+    switch (finish) {
+      case (#ok receipt) {
+        assert receipt.ledger == request.ledger;
+        assert receipt.amount == request.amount;
+        let after = Dex.localBalance(dex, request.subject, receipt.balanceKey);
+        let converted = SPI101Adapter.depositReceipt(request.subject, request.from, receipt, after);
+        assert converted.ledger == request.ledger;
+        assert converted.subject == request.subject;
+        assert converted.amount == request.amount;
+        #ok(converted)
+      };
+      case (#err err) { #err(SPI101Adapter.depositError(err)) }
+    }
+  };
+
+  public func finishErr(
+    dex : Dex.State,
+    controller : Principal,
+    ledger : Principal,
+    err : ICRCLedger.TransferFromError
+  ) : SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError>
+    modifies dex
+    requires Dex.controllerOf(dex) == controller;
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    ignore Dex.finishDepositErr(dex, ledger, err);
+    #err(#ledgerTransferFromErr err)
+  };
+
+  public func finishReject(
+    dex : Dex.State,
+    controller : Principal,
+    ledger : Principal,
+    reject : Types.LedgerReject
+  ) : SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError>
+    modifies dex
+    requires Dex.controllerOf(dex) == controller;
+    ensures Dex.controllerOf(dex) == controller;
+  {
+    ignore Dex.finishDepositReject(dex, ledger, reject);
+    #err(#ledgerTransferFromRejected(SPI101Adapter.ledgerRejectToSPI(reject)))
+  };
+}

@@ -3,6 +3,7 @@ import { ledgerKey, stopPocketIcServer } from "../../../../shared/common/runtime
 import {
   applySwapReceiptToModel,
   createDexScenario,
+  dexBalanceEntries,
   expectErr,
   expectOk,
   hasVariant,
@@ -47,10 +48,10 @@ describe("swap theft guards", () => {
     expectOk(await s.addLiquidity(0, 0, 1, 1_000_000n, 1_000_000n));
     expectOk(await s.approveAndDeposit(1, 0, 100_000n));
 
-    const beforeOther = await s.dex.actor.balances(s.users[2].getPrincipal());
+    const beforeOther = await dexBalanceEntries(s, s.users[2].getPrincipal());
     const receipt = expectOk<any>(await s.swap(1, 0, 1, 50_000n));
     expect(receipt.amountOut).toBeGreaterThan(0n);
-    expect(await s.dex.actor.balances(s.users[2].getPrincipal())).toEqual(beforeOther);
+    expect(await dexBalanceEntries(s, s.users[2].getPrincipal())).toEqual(beforeOther);
     await s.assertAll();
   });
 
@@ -65,8 +66,8 @@ describe("swap theft guards", () => {
 
     s.runtime.as(s.dex.actor, s.users[1]);
     const [first, second] = await Promise.all([
-      s.dex.actor.swap(s.ledgers[0].canisterId, s.ledgers[1].canisterId, 80_000n, 0n),
-      s.dex.actor.swap(s.ledgers[0].canisterId, s.ledgers[1].canisterId, 80_000n, 0n),
+      s.dex.actor.swap(s.users[1].getPrincipal(), s.ledgers[0].canisterId, s.ledgers[1].canisterId, 80_000n, 0n),
+      s.dex.actor.swap(s.users[1].getPrincipal(), s.ledgers[0].canisterId, s.ledgers[1].canisterId, 80_000n, 0n),
     ]);
     const results = [first, second];
     const oks = results.filter((result) => hasVariant(result, "ok")) as Array<{ ok: SwapReceiptLike }>;

@@ -26,7 +26,7 @@ describe("ledger retirement balance returns", () => {
     expectOk(await s.approveAndDeposit(1, 0, 80_000n));
 
     expectOk(await s.retireLedger(0));
-    expectErr(await s.deposit(2, 0, 10_000n), "ledgerNotActive");
+    expectErr(await s.deposit(2, 0, 10_000n), "ledgerNotSupported");
 
     const first = expectOk<any>(await s.returnLedgerBalances(0));
     expect(first.returnedUsers).toBe(1n);

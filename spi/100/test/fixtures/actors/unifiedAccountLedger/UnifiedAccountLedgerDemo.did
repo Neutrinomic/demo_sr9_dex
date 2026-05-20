@@ -1,0 +1,49 @@
+type VirtualId = nat;
+type UnifiedAccountLedgerDemo = 
+ service {
+   account: (id: nat) -> (PrincipalResult) query;
+   balance: (key: principal) -> (nat) query;
+   canUse: (key: principal) -> (bool) query;
+   credit: (key: principal, amount: nat) -> (NatResult);
+   debit: (key: principal, amount: nat) -> (NatResult);
+   entries: () -> (vec BalanceEntry) query;
+   resolve: (key: principal) -> (opt ControlInfo) query;
+   transfer: (from: principal, to: principal, amount: nat) ->
+    (TransferResult);
+ };
+type TransferResult = 
+ variant {
+   err: DemoError;
+   ok: record {
+         nat;
+         nat;
+       };
+ };
+type PrincipalResult = 
+ variant {
+   err: DemoError;
+   ok: principal;
+ };
+type NatResult = 
+ variant {
+   err: DemoError;
+   ok: nat;
+ };
+type DemoError = 
+ variant {
+   insufficientBalance;
+   invalidAccount;
+   virtualIdTooLarge;
+   virtualKeyUnavailable;
+ };
+type ControlInfo = 
+ record {
+   controller: principal;
+   id: opt VirtualId;
+ };
+type BalanceEntry = 
+ record {
+   principal;
+   nat;
+ };
+service : () -> UnifiedAccountLedgerDemo

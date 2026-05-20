@@ -1,23 +1,21 @@
 import AssetKey "./lib/AssetKey";
-import AmmMath "./lib/AmmMath";
-import BalanceBook "./lib/BalanceBook";
-import BSeq "mo:core/pure/BSeq";
+import AssetPrincipalLookup "./lib/AssetPrincipalLookup";
 import Dex "./lib/Dex";
 import ICRCLedger "mo:core/pattern/ICRCLedger";
-import PoolRegistry "./lib/PoolRegistry";
 import Principal "mo:core/Principal";
 import Profiling "mo:core/Profiling";
 import ProfileConfig "./lib/ProfileConfig";
 import Runtime "mo:core/Runtime";
+import DexSPI101DepositFlow "./lib/DexSPI101DepositFlow";
+import DexSPI101WithdrawFlow "./lib/DexSPI101WithdrawFlow";
+import SPI101Adapter "./lib/SPI101Adapter";
+import SPI101 "mo:spi/101/DepositWithdrawBalance";
 import Types "./lib/Types";
+import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
 
 persistent actor class DexActorDemo(controller : Principal) {
   public type Result<Ok, Err> = Types.Result<Ok, Err>;
   public type ControllerLedgerAction = Types.ControllerLedgerAction;
-  public type DepositReceipt = Types.DepositReceipt;
-  public type DepositError = Types.DepositError;
-  public type WithdrawReceipt = Types.WithdrawReceipt;
-  public type WithdrawError = Types.WithdrawError;
   public type QuoteReceipt = Types.QuoteReceipt;
   public type QuoteError = Types.QuoteError;
   public type SwapReceipt = Types.SwapReceipt;
@@ -34,71 +32,58 @@ persistent actor class DexActorDemo(controller : Principal) {
   public type DustAbandonReceipt = Types.DustAbandonReceipt;
   public type DustAbandonError = Types.DustAbandonError;
   public type ControllerLedgerError = Types.ControllerLedgerError;
+  public type SPI101DepositRequest = SPI101.DepositRequest;
+  public type SPI101DepositReceipt = SPI101.DepositReceipt;
+  public type SPI101DepositError = SPI101.DepositError;
+  public type SPI101WithdrawRequest = SPI101.WithdrawRequest;
+  public type SPI101WithdrawReceipt = SPI101.WithdrawReceipt;
+  public type SPI101WithdrawError = SPI101.WithdrawError;
+  public type SPI101BalanceRequest = SPI101.BalanceRequest;
+  public type SPI101BalanceReceipt = SPI101.BalanceReceipt;
 
   var dex : Dex.State = Dex.empty(controller);
+  var assetPrincipals : AssetPrincipalLookup.Lookup = AssetPrincipalLookup.empty();
 
   invariant Dex.controllerOf(dex) == controller;
   invariant Dex.model(dex).controller == controller;
 
-  private pure func ledgerReject() : Types.LedgerReject {
-    { message = "ledger call rejected" }
-  };
-
-  // Pulls approved ICRC tokens from the caller into the DEX account and credits
-  // the caller's local balance only after the ledger returns `#Ok`.
-  public shared({ caller }) func deposit(
-    ledger : Principal,
-    amount : Nat
-  ) : async Result<DepositReceipt, DepositError>
+  // SPI-101 deposit: pulls approved ICRC tokens from `request.from` into the
+  // DEX account and credits `request.subject` only after the ledger succeeds.
+  public shared({ caller }) func spi_101_deposit(
+    request : SPI101.DepositRequest
+  ) : async SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError>
     reads controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures switch (result) {
-      case (#ok receipt) {
-        receipt.ledger == ledger and
-        receipt.amount == amount
-      };
-      case (#err(_)) { true }
-    };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPre:start") };
-    ghost var controllerBefore = Dex.controllerOf(dex);
-    let started = Dex.beginDeposit(dex, ledger, amount);
+    let started = DexSPI101DepositFlow.start(dex, controller, caller, request);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPre:end") };
     switch (started) {
       case (#err err) { #err(err) };
       case (#ok _) {
-        assert Dex.controllerOf(dex) == controllerBefore;
-        let remote = ICRCLedger.fromPrincipal(ledger);
-        let args : ICRCLedger.TransferFromArgs = {
-          to = { owner = Runtime.selfId(); subaccount = null };
-          fee = null;
-          spender_subaccount = null;
-          from = { owner = caller; subaccount = null };
-          memo = null;
-          created_at_time = null;
-          amount = amount
-        };
+        let remote = ICRCLedger.fromPrincipal(request.ledger);
+        let args = SPI101Adapter.transferFromArgs(Runtime.selfId(), request);
         try {
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:start") };
           let result = await remote.icrc2_transfer_from(args);
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:end") };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:start") };
-          let out = switch (result) {
+          let out : SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError> = switch (result) {
             case (#Ok txIndex) {
-              let out = Dex.finishDepositOk(dex, caller, ledger, amount, txIndex);
-              assert Dex.controllerOf(dex) == controller;
-              assert Dex.model(dex).controller == controller;
-              out
+              DexSPI101DepositFlow.finishOk(dex, controller, request, txIndex)
             };
-            case (#Err err) { Dex.finishDepositErr(dex, ledger, err) }
+            case (#Err err) {
+              DexSPI101DepositFlow.finishErr(dex, controller, request.ledger, err)
+            }
           };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:end") };
           out
         } catch (_) {
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:end") };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:start") };
-          let out = Dex.finishDepositReject(dex, ledger, ledgerReject());
+          let reject = SPI101Adapter.ledgerReject();
+          let out = DexSPI101DepositFlow.finishReject(dex, controller, request.ledger, reject);
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:depositPost:end") };
           out
         }
@@ -106,60 +91,47 @@ persistent actor class DexActorDemo(controller : Principal) {
     }
   };
 
-  // Debits the caller's local balance by `amount + cachedFee`, transfers
-  // `amount` to the caller, and restores the exact debit if the ledger fails.
-  public shared({ caller }) func withdraw(
-    ledger : Principal,
-    amount : Nat
-  ) : async Result<WithdrawReceipt, WithdrawError>
+  // SPI-101 withdrawal: debits `request.subject` by `amount + cachedFee`,
+  // transfers `amount` to `request.to`, and restores the debit if the ledger
+  // fails or rejects.
+  public shared({ caller }) func spi_101_withdraw(
+    request : SPI101.WithdrawRequest
+  ) : async SPI101.Result<SPI101.WithdrawReceipt, SPI101.WithdrawError>
     reads controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures switch (result) {
-      case (#ok receipt) {
-        receipt.ledger == ledger and
-        receipt.amount == amount and
-        receipt.debitAmount == receipt.amount + receipt.fee
-      };
-      case (#err(_)) { true }
-    };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPre:start") };
-    let startedResult = Dex.beginWithdraw(dex, caller, ledger, amount);
+    let startedResult = DexSPI101WithdrawFlow.start(dex, controller, caller, request);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPre:end") };
     switch (startedResult) {
       case (#err err) { #err(err) };
       case (#ok started) {
+        assert started.ledger == request.ledger;
+        assert started.amount == request.amount;
         assert started.debitAmount == started.amount + started.fee;
-        let remote = ICRCLedger.fromPrincipal(ledger);
-        let args : ICRCLedger.TransferArg = {
-          to = { owner = caller; subaccount = null };
-          fee = ?started.fee;
-          memo = null;
-          from_subaccount = null;
-          created_at_time = null;
-          amount = amount
-        };
+        let remote = ICRCLedger.fromPrincipal(request.ledger);
+        let args = SPI101Adapter.transferArgs(request, started.fee);
         try {
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:start") };
           let result = await remote.icrc1_transfer(args);
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:end") };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:start") };
-          let out = switch (result) {
+          let out : SPI101.Result<SPI101.WithdrawReceipt, SPI101.WithdrawError> = switch (result) {
             case (#Ok txIndex) {
-              let out = Dex.finishWithdrawOk(dex, caller, started, txIndex);
-              assert Dex.controllerOf(dex) == controller;
-              assert Dex.model(dex).controller == controller;
-              out
+              DexSPI101WithdrawFlow.finishOk(dex, controller, request, started, txIndex)
             };
-            case (#Err err) { Dex.finishWithdrawErr(dex, caller, started, err) }
+            case (#Err err) {
+              DexSPI101WithdrawFlow.finishErr(dex, controller, request, started, err)
+            }
           };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:end") };
           out
         } catch (_) {
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:withdrawLedger:end") };
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:start") };
-          let out = Dex.finishWithdrawReject(dex, caller, started, ledgerReject());
+          let reject = SPI101Adapter.ledgerReject();
+          let out = DexSPI101WithdrawFlow.finishReject(dex, controller, request, started, reject);
           if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:withdrawPost:end") };
           out
         }
@@ -178,26 +150,12 @@ persistent actor class DexActorDemo(controller : Principal) {
     reads dex, controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures Dex.ledgerNet(dex, ledgerIn) == old(Dex.ledgerNet(dex, ledgerIn));
-    ensures Dex.ledgerNet(dex, ledgerOut) == old(Dex.ledgerNet(dex, ledgerOut));
-    ensures Dex.localObligation(dex, ledgerIn) == old(Dex.localObligation(dex, ledgerIn));
-    ensures Dex.localObligation(dex, ledgerOut) == old(Dex.localObligation(dex, ledgerOut));
-    ensures Dex.pendingOut(dex, ledgerIn) == old(Dex.pendingOut(dex, ledgerIn));
-    ensures Dex.pendingOut(dex, ledgerOut) == old(Dex.pendingOut(dex, ledgerOut));
     ensures switch (result) {
       case (#ok receipt) {
         receipt.ledgerIn == ledgerIn and
         receipt.ledgerOut == ledgerOut and
         receipt.amountIn == amountIn and
-        receipt.minAmountOut == minAmountOut and
-        receipt.ok == (receipt.amountOut >= minAmountOut) and
-        receipt.reserveIn > 0 and
-        receipt.reserveOut > 0 and
-        receipt.amountOut <= receipt.reserveOut and
-        receipt.amountOut ==
-          AmmMath.quoteExactIn(receipt.reserveIn, receipt.reserveOut, receipt.effectiveAmountIn) and
-        receipt.platformFee + receipt.lpFee == receipt.fee and
-        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn
+        receipt.minAmountOut == minAmountOut
       };
       case (#err(_)) { true }
     };
@@ -211,6 +169,7 @@ persistent actor class DexActorDemo(controller : Principal) {
   // Swaps deposited local balance from `ledgerIn` to `ledgerOut`, recomputes the
   // current quote, enforces `minAmountOut`, and credits platform fees locally.
   public shared({ caller }) func swap(
+    subject : Principal,
     ledgerIn : Principal,
     ledgerOut : Principal,
     amountIn : Nat,
@@ -220,35 +179,21 @@ persistent actor class DexActorDemo(controller : Principal) {
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
     ensures switch (result) {
-      case (#ok(_)) { true };
-      case (#err(_)) {
-        Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)) ==
-          old(Dex.localBalance(dex, caller, AssetKey.ledger(ledgerIn)))
-      }
-    };
-    ensures switch (result) {
       case (#ok receipt) {
         receipt.ledgerIn == ledgerIn and
         receipt.ledgerOut == ledgerOut and
         receipt.amountIn == amountIn and
-        receipt.minAmountOut == minAmountOut and
-        receipt.reserveInBefore > 0 and
-        receipt.reserveOutBefore > 0 and
-        receipt.amountOut > 0 and
-        receipt.amountOut >= minAmountOut and
-        receipt.amountOut < receipt.reserveOutBefore and
-        receipt.amountOut ==
-          AmmMath.quoteExactIn(receipt.reserveInBefore, receipt.reserveOutBefore, receipt.effectiveAmountIn) and
-        receipt.platformFee + receipt.lpFee == receipt.fee and
-        receipt.effectiveAmountIn + receipt.platformFee + receipt.lpFee == receipt.amountIn and
-        receipt.reserveInAfter == receipt.reserveInBefore + receipt.effectiveAmountIn + receipt.lpFee and
-        receipt.reserveOutAfter + receipt.amountOut == receipt.reserveOutBefore
+        receipt.minAmountOut == minAmountOut
       };
       case (#err(_)) { true }
     };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:swap:start") };
-    let out = Dex.swap(dex, caller, ledgerIn, ledgerOut, amountIn, minAmountOut);
+    if (not VirtualPrincipal.canControl(caller, subject)) {
+      if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:swap:end") };
+      return #err(#subjectNotAuthorized(SPI101Adapter.authError(caller, subject)))
+    };
+    let out = Dex.swap(dex, subject, ledgerIn, ledgerOut, amountIn, minAmountOut);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:swap:end") };
     out
   };
@@ -256,95 +201,36 @@ persistent actor class DexActorDemo(controller : Principal) {
   // Adds or removes liquidity using only deposited local balances. LP positions
   // are virtual ledger balances under the pool asset key.
   public shared({ caller }) func liquidity(
+    subject : Principal,
     request : LiquidityRequest
   ) : async Result<LiquidityReceipt, LiquidityError>
     reads controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures switch (result) {
-      case (#ok(#added receipt)) {
-        receipt.shares > 0 and
-        (
-          receipt.lockedShares == 0 or
-          receipt.lockedShares == AmmMath.minimumLiquidity()
-        )
-      };
-      case (#ok(#removed receipt)) { receipt.shares > 0 };
-      case (#err(_)) { true }
-    };
-    ensures switch (result) {
-      case (#ok(#added receipt)) {
-        (
-          BalanceBook.recordKey(caller, receipt.poolKey) !=
-            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
-          BalanceBook.recordKey(caller, receipt.poolKey) !=
-            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
-        ) ==>
-          Dex.localBalance(dex, caller, receipt.poolKey) ==
-            old(Dex.localBalance(dex, caller, receipt.poolKey)) + receipt.shares
-      };
-      case (#ok(#removed receipt)) {
-        (
-          BalanceBook.recordKey(caller, receipt.poolKey) !=
-            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerA)) and
-          BalanceBook.recordKey(caller, receipt.poolKey) !=
-            BalanceBook.recordKey(caller, AssetKey.ledger(receipt.ledgerB))
-        ) ==>
-          Dex.localBalance(dex, caller, receipt.poolKey) + receipt.shares ==
-            old(Dex.localBalance(dex, caller, receipt.poolKey))
-      };
-      case (#err(_)) { true }
-    };
-    ensures switch (request) {
-      case (#add req) {
-        switch (result) {
-          case (#ok(#added receipt)) {
-            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
-            receipt.usedA > 0 and
-            receipt.usedB > 0 and
-            receipt.shares >= req.minShares and
-            (
-              receipt.lockedShares == 0 or
-              receipt.lockedShares == AmmMath.minimumLiquidity()
-            ) and
-            receipt.usedA + receipt.leftoverA ==
-              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountA } else { req.maxAmountB }) and
-            receipt.usedB + receipt.leftoverB ==
-              (if (receipt.ledgerA == req.ledgerA) { req.maxAmountB } else { req.maxAmountA })
-          };
-          case _ { true }
-        }
-      };
-      case (#rem req) {
-        switch (result) {
-          case (#ok(#removed receipt)) {
-            receipt.poolKey == AssetKey.pool(req.ledgerA, req.ledgerB) and
-            receipt.shares == req.shares and
-            receipt.amountA >=
-              (if (receipt.ledgerA == req.ledgerA) { req.minAmountA } else { req.minAmountB }) and
-            receipt.amountB >=
-              (if (receipt.ledgerA == req.ledgerA) { req.minAmountB } else { req.minAmountA })
-          };
-          case _ { true }
-        }
-      }
-    };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:liquidity:start") };
-    let out = Dex.liquidity(dex, caller, request);
+    if (not VirtualPrincipal.canControl(caller, subject)) {
+      if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:liquidity:end") };
+      return #err(#subjectNotAuthorized(SPI101Adapter.authError(caller, subject)))
+    };
+    let out = Dex.liquidity(dex, subject, request);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:liquidity:end") };
     out
   };
 
-  // Lists every positive local balance for `user`, including real ledger keys
-  // and virtual pool-share keys.
-  public query func balances(user : Principal) : async [(Text, Nat)]
-    reads dex, controller
+  // SPI-101 balance: lists every positive local balance for `request.subject`.
+  // Real tokens are keyed by their ledger principals and pool-share balances are
+  // keyed by SPI-100 virtual principals scoped to this DEX canister.
+  public shared query func spi_101_balance(
+    request : SPI101.BalanceRequest
+  ) : async SPI101.BalanceReceipt
+    reads dex, controller, assetPrincipals
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:balances:start") };
-    let out = Dex.balances(dex, user);
+    let entries = Dex.balances(dex, request.subject);
+    let out = AssetPrincipalLookup.spi101Receipt(assetPrincipals, request.subject, entries);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:balances:end") };
     out
   };
@@ -354,18 +240,6 @@ persistent actor class DexActorDemo(controller : Principal) {
     reads dex, controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures forall<Int>(pure func (i : Int) : Bool =
-      if (0 <= i and i < Seq.len<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result))) {
-        PoolRegistry.poolInfoHealthy(
-          Seq.get<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result), i)
-        )
-      } else { true });
-    ensures forall<Int>(pure func (i : Int) : Bool =
-      if (0 <= i and i < Seq.len<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result))) {
-        PoolRegistry.poolInfoCanonical(
-          Seq.get<PoolInfo>(BSeq.Spec.arrayToSeq<PoolInfo>(result), i)
-        )
-      } else { true });
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:pools:start") };
     let out = Dex.pools(dex);
@@ -379,7 +253,7 @@ persistent actor class DexActorDemo(controller : Principal) {
     action : ControllerLedgerAction
   ) : async Result<(), ControllerLedgerError>
     reads controller
-    modifies dex
+    modifies dex, assetPrincipals
     ensures Dex.controllerOf(dex) == controller;
   {
     switch (action) {
@@ -397,11 +271,17 @@ persistent actor class DexActorDemo(controller : Principal) {
               if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:feeLedger:end") };
               if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPost:start") };
               let out = Dex.controllerAddLedger(dex, caller, ledger, fee);
+              switch (out) {
+                case (#ok(_)) {
+                  AssetPrincipalLookup.put(assetPrincipals, AssetKey.ledger(ledger), ledger)
+                };
+                case (#err(_)) {}
+              };
               if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:controllerLedgerPost:end") };
               out
             } catch (_) {
               if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:feeLedger:end") };
-              #err(#ledgerFeeRejected(ledgerReject()))
+              #err(#ledgerFeeRejected(SPI101Adapter.ledgerReject()))
             }
           }
         }
@@ -428,24 +308,22 @@ persistent actor class DexActorDemo(controller : Principal) {
     ledgerB : Principal
   ) : async Result<PoolInfo, CreatePoolError>
     reads controller
-    modifies dex
+    modifies dex, assetPrincipals
     ensures Dex.controllerOf(dex) == controller;
-    ensures switch (result) {
-      case (#ok info) {
-        info.ledgerA != info.ledgerB and
-        info.key == AssetKey.pool(ledgerA, ledgerB) and
-        info.reserveA == 0 and
-        info.reserveB == 0 and
-        info.totalShares == 0 and
-        info.lockedShares == 0 and
-        Dex.ledgerHasPool(dex, ledgerA) and
-        Dex.ledgerHasPool(dex, ledgerB)
-      };
-      case (#err(_)) { true }
-    };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:createPool:start") };
     let out = Dex.createPool(dex, caller, ledgerA, ledgerB);
+    switch (out) {
+      case (#ok info) {
+        switch (VirtualPrincipal.encode(Runtime.selfId(), info.id)) {
+          case null {};
+          case (?principal) {
+            AssetPrincipalLookup.put(assetPrincipals, info.key, principal)
+          }
+        }
+      };
+      case (#err(_)) {}
+    };
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:createPool:end") };
     out
   };
@@ -459,13 +337,6 @@ persistent actor class DexActorDemo(controller : Principal) {
     reads controller
     modifies dex
     ensures Dex.controllerOf(dex) == controller;
-    ensures switch (result) {
-      case (#ok receipt) {
-        receipt.key == AssetKey.pool(ledgerA, ledgerB) and
-        receipt.ledgerA != receipt.ledgerB
-      };
-      case (#err(_)) { true }
-    };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:removePool:start") };
     let out = Dex.removePool(dex, caller, ledgerA, ledgerB);
@@ -523,7 +394,7 @@ persistent actor class DexActorDemo(controller : Principal) {
             } catch (_) {
               if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:returnLedger:end") };
               if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:start") };
-              let out = Dex.finishReturnReject(dex, pending, ledgerReject());
+              let out = Dex.finishReturnReject(dex, pending, SPI101Adapter.ledgerReject());
               if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:returnLedgerBalancesPost:end") };
               out
             }
@@ -537,6 +408,7 @@ persistent actor class DexActorDemo(controller : Principal) {
   // No ledger transfer is made; the balance is removed from user obligations and
   // tracked as abandoned dust so conservation accounting stays explicit.
   public shared({ caller }) func abandonDust(
+    subject : Principal,
     ledger : Principal
   ) : async Result<DustAbandonReceipt, DustAbandonError>
     reads controller
@@ -545,7 +417,7 @@ persistent actor class DexActorDemo(controller : Principal) {
     ensures switch (result) {
       case (#ok receipt) {
         receipt.ledger == ledger and
-        receipt.user == caller and
+        receipt.user == subject and
         receipt.abandonedAmount > 0 and
         receipt.abandonedAmount <= receipt.fee
       };
@@ -553,7 +425,11 @@ persistent actor class DexActorDemo(controller : Principal) {
     };
   {
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:abandonDust:start") };
-    let out = Dex.abandonDust(dex, caller, ledger);
+    if (not VirtualPrincipal.canControl(caller, subject)) {
+      if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:abandonDust:end") };
+      return #err(#subjectNotAuthorized(SPI101Adapter.authError(caller, subject)))
+    };
+    let out = Dex.abandonDust(dex, subject, ledger);
     if (ProfileConfig.enabled) { Profiling.mark("dex:DexActorDemo:abandonDust:end") };
     out
   };

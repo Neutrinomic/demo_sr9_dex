@@ -1,5 +1,6 @@
 import {
   createTestRuntime,
+  principalOf,
   type Caller,
   type PocketIc,
   type Principal,
@@ -85,7 +86,12 @@ export async function approveAndDeposit(
 ): Promise<unknown> {
   await approve(env.ledger, user, env.dao.canisterId, amount + env.ledger.fee);
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.deposit(amount);
+  return env.dao.actor.spi_101_deposit({
+    subject: principalOf(user),
+    ledger: env.ledger.canisterId,
+    from: env.runtime.account(user),
+    amount,
+  });
 }
 
 export async function deposit(
@@ -94,7 +100,12 @@ export async function deposit(
   amount: bigint,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.deposit(amount);
+  return env.dao.actor.spi_101_deposit({
+    subject: principalOf(user),
+    ledger: env.ledger.canisterId,
+    from: env.runtime.account(user),
+    amount,
+  });
 }
 
 export async function withdraw(
@@ -103,7 +114,12 @@ export async function withdraw(
   amount: bigint,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.withdraw(amount);
+  return env.dao.actor.spi_101_withdraw({
+    subject: principalOf(user),
+    ledger: env.ledger.canisterId,
+    to: env.runtime.account(user),
+    amount,
+  });
 }
 
 export async function stake(
@@ -112,7 +128,7 @@ export async function stake(
   amount: bigint,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.stake(amount);
+  return env.dao.actor.stake(principalOf(user), amount);
 }
 
 export async function requestUnstake(
@@ -121,7 +137,7 @@ export async function requestUnstake(
   amount: bigint,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.request_unstake(amount);
+  return env.dao.actor.request_unstake(principalOf(user), amount);
 }
 
 export async function claimUnstaked(
@@ -129,7 +145,7 @@ export async function claimUnstaked(
   user: Caller,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.claim_unstaked();
+  return env.dao.actor.claim_unstaked(principalOf(user));
 }
 
 export async function createProposal(
@@ -138,7 +154,7 @@ export async function createProposal(
   action: unknown,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.create_proposal(action);
+  return env.dao.actor.create_proposal(principalOf(user), action);
 }
 
 export async function vote(
@@ -148,15 +164,7 @@ export async function vote(
   choice: unknown,
 ): Promise<unknown> {
   env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.vote(id, choice);
-}
-
-export async function retryWithdrawal(
-  env: DaoE2E,
-  user: Caller,
-): Promise<unknown> {
-  env.runtime.as(env.dao.actor, user);
-  return env.dao.actor.retry_withdrawal();
+  return env.dao.actor.vote(principalOf(user), id, choice);
 }
 
 export async function depositStakeAndMature(

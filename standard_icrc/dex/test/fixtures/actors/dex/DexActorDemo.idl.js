@@ -12,10 +12,14 @@ export const idlFactory = ({ IDL }) => {
     'ledgerHasPools' : IDL.Principal,
     'ledgerNotRetiring' : IDL.Principal,
     'ledgerHasPendingOps' : IDL.Principal,
+    'subjectNotAuthorized' : IDL.Record({
+      'subject' : IDL.Principal,
+      'caller' : IDL.Principal,
+    }),
     'noLocalBalance' : IDL.Null,
     'balanceExceedsFee' : IDL.Record({ 'fee' : IDL.Nat, 'balance' : IDL.Nat }),
   });
-  const Result_9 = IDL.Variant({
+  const Result_7 = IDL.Variant({
     'ok' : DustAbandonReceipt,
     'err' : DustAbandonError,
   });
@@ -36,7 +40,7 @@ export const idlFactory = ({ IDL }) => {
     'notController' : IDL.Null,
     'ledgerFeeRejected' : LedgerReject,
   });
-  const Result_8 = IDL.Variant({
+  const Result_6 = IDL.Variant({
     'ok' : IDL.Null,
     'err' : ControllerLedgerError,
   });
@@ -56,34 +60,7 @@ export const idlFactory = ({ IDL }) => {
     'sameLedger' : IDL.Null,
     'poolAlreadyExists' : IDL.Null,
   });
-  const Result_7 = IDL.Variant({ 'ok' : PoolInfo, 'err' : CreatePoolError });
-  const DepositReceipt = IDL.Record({
-    'txIndex' : IDL.Nat,
-    'ledger' : IDL.Principal,
-    'balanceKey' : IDL.Text,
-    'amount' : IDL.Nat,
-  });
-  const TransferFromError = IDL.Variant({
-    'GenericError' : IDL.Record({
-      'message' : IDL.Text,
-      'error_code' : IDL.Nat,
-    }),
-    'TemporarilyUnavailable' : IDL.Null,
-    'InsufficientAllowance' : IDL.Record({ 'allowance' : IDL.Nat }),
-    'BadBurn' : IDL.Record({ 'min_burn_amount' : IDL.Nat }),
-    'Duplicate' : IDL.Record({ 'duplicate_of' : IDL.Nat }),
-    'BadFee' : IDL.Record({ 'expected_fee' : IDL.Nat }),
-    'CreatedInFuture' : IDL.Record({ 'ledger_time' : IDL.Nat64 }),
-    'TooOld' : IDL.Null,
-    'InsufficientFunds' : IDL.Record({ 'balance' : IDL.Nat }),
-  });
-  const DepositError = IDL.Variant({
-    'ledgerNotActive' : IDL.Principal,
-    'zeroAmount' : IDL.Null,
-    'ledgerTransferFromErr' : TransferFromError,
-    'ledgerTransferFromRejected' : LedgerReject,
-  });
-  const Result_6 = IDL.Variant({ 'ok' : DepositReceipt, 'err' : DepositError });
+  const Result_5 = IDL.Variant({ 'ok' : PoolInfo, 'err' : CreatePoolError });
   const LiquidityRequest = IDL.Variant({
     'add' : IDL.Record({
       'minShares' : IDL.Nat,
@@ -128,12 +105,16 @@ export const idlFactory = ({ IDL }) => {
     'ledgerNotActive' : IDL.Principal,
     'zeroAmount' : IDL.Null,
     'poolNotFound' : IDL.Null,
+    'subjectNotAuthorized' : IDL.Record({
+      'subject' : IDL.Principal,
+      'caller' : IDL.Principal,
+    }),
     'insufficientLocalBalance' : IDL.Null,
     'sameLedger' : IDL.Null,
     'insufficientLiquidity' : IDL.Null,
     'slippage' : IDL.Null,
   });
-  const Result_5 = IDL.Variant({
+  const Result_4 = IDL.Variant({
     'ok' : LiquidityReceipt,
     'err' : LiquidityError,
   });
@@ -158,7 +139,7 @@ export const idlFactory = ({ IDL }) => {
     'sameLedger' : IDL.Null,
     'insufficientLiquidity' : IDL.Null,
   });
-  const Result_4 = IDL.Variant({ 'ok' : QuoteReceipt, 'err' : QuoteError });
+  const Result_3 = IDL.Variant({ 'ok' : QuoteReceipt, 'err' : QuoteError });
   const RemovePoolReceipt = IDL.Record({
     'key' : IDL.Text,
     'returnedA' : IDL.Nat,
@@ -176,7 +157,7 @@ export const idlFactory = ({ IDL }) => {
     'notController' : IDL.Null,
     'sameLedger' : IDL.Null,
   });
-  const Result_3 = IDL.Variant({
+  const Result_2 = IDL.Variant({
     'ok' : RemovePoolReceipt,
     'err' : RemovePoolError,
   });
@@ -220,9 +201,108 @@ export const idlFactory = ({ IDL }) => {
     'ledgerTransferRejected' : LedgerReject,
     'notController' : IDL.Null,
   });
-  const Result_2 = IDL.Variant({
+  const Result_1 = IDL.Variant({
     'ok' : ReturnLedgerBalancesReceipt,
     'err' : ReturnLedgerBalancesError,
+  });
+  const BalanceRequest = IDL.Record({ 'subject' : IDL.Principal });
+  const BalanceKey = IDL.Principal;
+  const BalanceEntry = IDL.Tuple(BalanceKey, IDL.Nat);
+  const BalanceReceipt = IDL.Record({
+    'subject' : IDL.Principal,
+    'entries' : IDL.Vec(BalanceEntry),
+  });
+  const Account = IDL.Record({
+    'owner' : IDL.Principal,
+    'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+  });
+  const DepositRequest = IDL.Record({
+    'subject' : IDL.Principal,
+    'from' : Account,
+    'ledger' : IDL.Principal,
+    'amount' : IDL.Nat,
+  });
+  const DepositReceipt = IDL.Record({
+    'txIndex' : IDL.Nat,
+    'subject' : IDL.Principal,
+    'from' : Account,
+    'ledger' : IDL.Principal,
+    'balanceAfter' : IDL.Nat,
+    'amount' : IDL.Nat,
+  });
+  const TransferFromError = IDL.Variant({
+    'GenericError' : IDL.Record({
+      'message' : IDL.Text,
+      'error_code' : IDL.Nat,
+    }),
+    'TemporarilyUnavailable' : IDL.Null,
+    'InsufficientAllowance' : IDL.Record({ 'allowance' : IDL.Nat }),
+    'BadBurn' : IDL.Record({ 'min_burn_amount' : IDL.Nat }),
+    'Duplicate' : IDL.Record({ 'duplicate_of' : IDL.Nat }),
+    'BadFee' : IDL.Record({ 'expected_fee' : IDL.Nat }),
+    'CreatedInFuture' : IDL.Record({ 'ledger_time' : IDL.Nat64 }),
+    'TooOld' : IDL.Null,
+    'InsufficientFunds' : IDL.Record({ 'balance' : IDL.Nat }),
+  });
+  const DepositError = IDL.Variant({
+    'zeroAmount' : IDL.Null,
+    'subjectNotAuthorized' : IDL.Record({
+      'subject' : IDL.Principal,
+      'caller' : IDL.Principal,
+    }),
+    'ledgerTransferFromErr' : TransferFromError,
+    'ledgerTransferFromRejected' : LedgerReject,
+    'sourceOwnerMismatch' : IDL.Record({
+      'caller' : IDL.Principal,
+      'fromOwner' : IDL.Principal,
+    }),
+    'amountTooLow' : IDL.Record({ 'minAmount' : IDL.Nat, 'amount' : IDL.Nat }),
+    'ledgerNotSupported' : IDL.Principal,
+  });
+  const Result__1_1 = IDL.Variant({
+    'ok' : DepositReceipt,
+    'err' : DepositError,
+  });
+  const WithdrawRequest = IDL.Record({
+    'to' : Account,
+    'subject' : IDL.Principal,
+    'ledger' : IDL.Principal,
+    'amount' : IDL.Nat,
+  });
+  const WithdrawReceipt = IDL.Record({
+    'to' : Account,
+    'fee' : IDL.Nat,
+    'txIndex' : IDL.Nat,
+    'subject' : IDL.Principal,
+    'debitAmount' : IDL.Nat,
+    'ledger' : IDL.Principal,
+    'balanceAfter' : IDL.Nat,
+    'amount' : IDL.Nat,
+  });
+  const PendingWithdrawal = IDL.Record({
+    'to' : Account,
+    'fee' : IDL.Nat,
+    'subject' : IDL.Principal,
+    'debitAmount' : IDL.Nat,
+    'ledger' : IDL.Principal,
+    'amount' : IDL.Nat,
+  });
+  const WithdrawError = IDL.Variant({
+    'zeroAmount' : IDL.Null,
+    'subjectNotAuthorized' : IDL.Record({
+      'subject' : IDL.Principal,
+      'caller' : IDL.Principal,
+    }),
+    'ledgerTransferErr' : TransferError,
+    'insufficientLocalBalance' : IDL.Null,
+    'ledgerTransferRejected' : LedgerReject,
+    'ledgerNotSupported' : IDL.Principal,
+    'withdrawInProgress' : PendingWithdrawal,
+    'ledgerFeeRejected' : LedgerReject,
+  });
+  const Result__1 = IDL.Variant({
+    'ok' : WithdrawReceipt,
+    'err' : WithdrawError,
   });
   const SwapReceipt = IDL.Record({
     'fee' : IDL.Nat,
@@ -243,54 +323,37 @@ export const idlFactory = ({ IDL }) => {
     'ledgerNotActive' : IDL.Principal,
     'zeroAmount' : IDL.Null,
     'poolNotFound' : IDL.Null,
+    'subjectNotAuthorized' : IDL.Record({
+      'subject' : IDL.Principal,
+      'caller' : IDL.Principal,
+    }),
     'insufficientLocalBalance' : IDL.Null,
     'sameLedger' : IDL.Null,
     'insufficientLiquidity' : IDL.Null,
     'slippage' : IDL.Null,
   });
-  const Result_1 = IDL.Variant({ 'ok' : SwapReceipt, 'err' : SwapError });
-  const WithdrawReceipt = IDL.Record({
-    'fee' : IDL.Nat,
-    'txIndex' : IDL.Nat,
-    'debitAmount' : IDL.Nat,
-    'ledger' : IDL.Principal,
-    'balanceKey' : IDL.Text,
-    'amount' : IDL.Nat,
-  });
-  const WithdrawError = IDL.Variant({
-    'ledgerNotWhitelisted' : IDL.Principal,
-    'zeroAmount' : IDL.Null,
-    'ledgerTransferErr' : TransferError,
-    'insufficientLocalBalance' : IDL.Null,
-    'ledgerTransferRejected' : LedgerReject,
-    'withdrawInProgress' : IDL.Null,
-  });
-  const Result = IDL.Variant({ 'ok' : WithdrawReceipt, 'err' : WithdrawError });
+  const Result = IDL.Variant({ 'ok' : SwapReceipt, 'err' : SwapError });
   const DexActorDemo = IDL.Service({
-    'abandonDust' : IDL.Func([IDL.Principal], [Result_9], []),
-    'balances' : IDL.Func(
-        [IDL.Principal],
-        [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat))],
-        ['query'],
-      ),
-    'controller_ledger' : IDL.Func([ControllerLedgerAction], [Result_8], []),
-    'createPool' : IDL.Func([IDL.Principal, IDL.Principal], [Result_7], []),
-    'deposit' : IDL.Func([IDL.Principal, IDL.Nat], [Result_6], []),
-    'liquidity' : IDL.Func([LiquidityRequest], [Result_5], []),
+    'abandonDust' : IDL.Func([IDL.Principal, IDL.Principal], [Result_7], []),
+    'controller_ledger' : IDL.Func([ControllerLedgerAction], [Result_6], []),
+    'createPool' : IDL.Func([IDL.Principal, IDL.Principal], [Result_5], []),
+    'liquidity' : IDL.Func([IDL.Principal, LiquidityRequest], [Result_4], []),
     'pools' : IDL.Func([], [IDL.Vec(PoolInfo)], ['query']),
     'quote' : IDL.Func(
         [IDL.Principal, IDL.Principal, IDL.Nat, IDL.Nat],
-        [Result_4],
+        [Result_3],
         ['query'],
       ),
-    'removePool' : IDL.Func([IDL.Principal, IDL.Principal], [Result_3], []),
-    'returnLedgerBalances' : IDL.Func([IDL.Principal], [Result_2], []),
+    'removePool' : IDL.Func([IDL.Principal, IDL.Principal], [Result_2], []),
+    'returnLedgerBalances' : IDL.Func([IDL.Principal], [Result_1], []),
+    'spi_101_balance' : IDL.Func([BalanceRequest], [BalanceReceipt], ['query']),
+    'spi_101_deposit' : IDL.Func([DepositRequest], [Result__1_1], []),
+    'spi_101_withdraw' : IDL.Func([WithdrawRequest], [Result__1], []),
     'swap' : IDL.Func(
-        [IDL.Principal, IDL.Principal, IDL.Nat, IDL.Nat],
-        [Result_1],
+        [IDL.Principal, IDL.Principal, IDL.Principal, IDL.Nat, IDL.Nat],
+        [Result],
         [],
       ),
-    'withdraw' : IDL.Func([IDL.Principal, IDL.Nat], [Result], []),
   });
   return DexActorDemo;
 };

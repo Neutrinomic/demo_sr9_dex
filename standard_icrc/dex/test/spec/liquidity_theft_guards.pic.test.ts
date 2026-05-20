@@ -74,8 +74,8 @@ describe("liquidity theft guards", () => {
       },
     };
     const [first, second] = await Promise.all([
-      s.dex.actor.liquidity(request),
-      s.dex.actor.liquidity(request),
+      s.dex.actor.liquidity(s.users[1].getPrincipal(), request),
+      s.dex.actor.liquidity(s.users[1].getPrincipal(), request),
     ]);
     const results = [first, second];
     const oks = results.filter((result) => hasVariant(result, "ok")) as Array<{ ok: { added: AddReceiptLike } }>;

@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { stopPocketIcServer } from "../../../../shared/common/runtime.ts";
 import {
   createDexScenario,
+  dexBalanceEntries,
   hasVariant,
   type DexScenario,
 } from "./support/dexScenario.ts";
@@ -47,6 +48,6 @@ describe("standard ledger time and duplicate edge cases", () => {
     });
     expect(hasVariant(future, "Err")).toBe(true);
     expect(hasVariant(future.Err, "CreatedInFuture")).toBe(true);
-    expect(await s.dex.actor.balances(s.users[0].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[0].getPrincipal())).toEqual([]);
   });
 });

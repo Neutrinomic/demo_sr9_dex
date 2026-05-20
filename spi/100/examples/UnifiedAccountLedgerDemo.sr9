@@ -1,0 +1,130 @@
+import BMap "mo:core/pure/BMap";
+import Principal "mo:core/Principal";
+import AccountBook "mo:spi/100/examples/AccountBook";
+import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
+
+persistent actor class UnifiedAccountLedgerDemo() {
+  public type DemoError = {
+    #invalidAccount;
+    #virtualIdTooLarge;
+    #virtualKeyUnavailable;
+    #insufficientBalance
+  };
+
+  public type PrincipalResult = {
+    #ok : Principal;
+    #err : DemoError
+  };
+
+  public type NatResult = {
+    #ok : Nat;
+    #err : DemoError
+  };
+
+  public type TransferResult = {
+    #ok : (Nat, Nat);
+    #err : DemoError
+  };
+
+  public type BalanceEntry = (Principal, Nat);
+
+  var balances : AccountBook.AccountBook = BMap.empty<Principal, Nat>();
+
+  invariant BMap.orderedBy<Principal, Nat>(balances, Principal.compare);
+
+  public shared query({ caller }) func account(id : Nat) : async PrincipalResult
+    requires true;
+  {
+    if (id > VirtualPrincipal.maxId) {
+      #err(#virtualIdTooLarge)
+    } else {
+      switch (VirtualPrincipal.encode(caller, id)) {
+        case null { #err(#virtualKeyUnavailable) };
+        case (?key) { #ok(key) }
+      }
+    }
+  };
+
+  public query func resolve(key : Principal) : async ?VirtualPrincipal.ControlInfo
+    requires true;
+  {
+    VirtualPrincipal.resolveControl(key)
+  };
+
+  public shared query({ caller }) func canUse(key : Principal) : async Bool
+    requires true;
+  {
+    VirtualPrincipal.canControl(caller, key)
+  };
+
+  public query func balance(key : Principal) : async Nat
+    reads balances
+    ensures result == Map.getOr<Principal, Nat>(
+      BMap.Spec.model<Principal, Nat>(balances),
+      key,
+      0
+    );
+  {
+    AccountBook.balance(balances, key)
+  };
+
+  public shared({ caller }) func credit(key : Principal, amount : Nat) : async NatResult
+    modifies balances
+    ensures AccountBook.ordered(balances);
+  {
+    switch (AccountBook.creditOwned(balances, caller, key, amount)) {
+      case null { #err(#invalidAccount) };
+      case (?next) {
+        let nextBalance = AccountBook.balance(next, key);
+        balances := next;
+        #ok(nextBalance)
+      }
+    }
+  };
+
+  public shared({ caller }) func debit(key : Principal, amount : Nat) : async NatResult
+    modifies balances
+    ensures AccountBook.ordered(balances);
+  {
+    if (AccountBook.balance(balances, key) < amount) {
+      return #err(#insufficientBalance)
+    };
+    switch (AccountBook.debitOwned(balances, caller, key, amount)) {
+      case null { #err(#invalidAccount) };
+      case (?next) {
+        let nextBalance = AccountBook.balance(next, key);
+        balances := next;
+        #ok(nextBalance)
+      }
+    }
+  };
+
+  public shared({ caller }) func transfer(
+    from : Principal,
+    to : Principal,
+    amount : Nat
+  ) : async TransferResult
+    modifies balances
+    ensures AccountBook.ordered(balances);
+  {
+    if (AccountBook.balance(balances, from) < amount) {
+      return #err(#insufficientBalance)
+    };
+    switch (AccountBook.transferOwned(balances, caller, from, to, amount)) {
+      case null { #err(#invalidAccount) };
+      case (?next) {
+        let fromBalance = AccountBook.balance(next, from);
+        let toBalance = AccountBook.balance(next, to);
+        balances := next;
+        #ok((fromBalance, toBalance))
+      }
+    }
+  };
+
+  public query func entries() : async [BalanceEntry]
+    reads balances
+    ensures result.size() == BMap.size<Principal, Nat>(balances);
+  {
+    BMap.toArray<Principal, Nat>(balances)
+  }
+}

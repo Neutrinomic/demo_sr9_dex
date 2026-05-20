@@ -1,0 +1,40 @@
+type ProtocolVirtualAssetDemo = 
+ service {
+   asset: (id: nat) -> (PrincipalResult) query;
+   balance: (id: nat) -> (NatResult) query;
+   callerControlsAsset: (id: nat) -> (bool) query;
+   controllerCredit: (id: nat, amount: nat) -> (NatResult);
+   controllerDebit: (id: nat, amount: nat) -> (NatResult);
+   controllerMove: (fromId: nat, toId: nat, amount: nat) -> (MoveResult);
+   entries: () -> (vec BalanceEntry) query;
+ };
+type PrincipalResult = 
+ variant {
+   err: DemoError;
+   ok: principal;
+ };
+type NatResult = 
+ variant {
+   err: DemoError;
+   ok: nat;
+ };
+type MoveResult = 
+ variant {
+   err: DemoError;
+   ok: record {
+         nat;
+         nat;
+       };
+ };
+type DemoError = 
+ variant {
+   insufficientBalance;
+   notController;
+   virtualKeyUnavailable;
+ };
+type BalanceEntry = 
+ record {
+   principal;
+   nat;
+ };
+service : (controller: principal) -> ProtocolVirtualAssetDemo

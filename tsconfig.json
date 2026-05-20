@@ -16,6 +16,8 @@
   "include": [
     "shared/**/*.ts",
     "shared/**/*.d.ts",
+    "spi/**/*.ts",
+    "spi/**/*.d.ts",
     "standard_icrc/**/*.ts",
     "standard_icrc/**/*.d.ts"
   ],

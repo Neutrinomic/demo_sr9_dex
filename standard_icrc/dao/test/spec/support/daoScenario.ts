@@ -243,11 +243,16 @@ export async function createDaoScenario(
     },
     async deposit(userRef, amount): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.deposit(amount);
+      const result = await dao.actor.spi_101_deposit({
+        subject: principal,
+        ledger: ledger.canisterId,
+        from: runtime.account(user),
+        amount,
+      });
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as DepositReceiptLike;
-        const principal = principalOf(user);
         model.set(model.liquid, principal, model.get(model.liquid, principal) + receipt.amount);
         model.daoLedgerBalance += receipt.amount;
       }
@@ -258,11 +263,16 @@ export async function createDaoScenario(
     },
     async withdraw(userRef, amount): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.withdraw(amount);
+      const result = await dao.actor.spi_101_withdraw({
+        subject: principal,
+        ledger: ledger.canisterId,
+        to: runtime.account(user),
+        amount,
+      });
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as WithdrawReceiptLike;
-        const principal = principalOf(user);
         model.set(
           model.liquid,
           principal,
@@ -277,11 +287,11 @@ export async function createDaoScenario(
     },
     async stake(userRef, amount): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.stake(amount);
+      const result = await dao.actor.stake(principal, amount);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as StakeReceiptLike;
-        const principal = principalOf(user);
         model.set(model.liquid, principal, model.get(model.liquid, principal) - receipt.amount);
         model.set(
           model.activeStake,
@@ -296,11 +306,11 @@ export async function createDaoScenario(
     },
     async requestUnstake(userRef, amount): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.request_unstake(amount);
+      const result = await dao.actor.request_unstake(principal, amount);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as RequestUnstakeReceiptLike;
-        const principal = principalOf(user);
         model.set(model.activeStake, principal, receipt.activeStake);
         model.pendingUnstake.set(model.key(principal), {
           amount: receipt.pendingUnstake,
@@ -313,11 +323,11 @@ export async function createDaoScenario(
     },
     async claimUnstaked(userRef): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.claim_unstaked();
+      const result = await dao.actor.claim_unstaked(principal);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as ClaimUnstakeReceiptLike;
-        const principal = principalOf(user);
         model.pendingUnstake.delete(model.key(principal));
         model.set(model.liquid, principal, receipt.liquidBalance);
       }
@@ -327,11 +337,11 @@ export async function createDaoScenario(
     },
     async createProposal(userRef, action): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.create_proposal(action);
+      const result = await dao.actor.create_proposal(principal, action);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as ProposalReceiptLike;
-        const principal = principalOf(user);
         const bond = model.config.proposalThreshold;
         model.set(model.activeStake, principal, model.get(model.activeStake, principal) - bond);
         model.set(model.proposalBonds, principal, model.get(model.proposalBonds, principal) + bond);
@@ -361,14 +371,15 @@ export async function createDaoScenario(
     },
     async vote(userRef, id, choice): Promise<unknown> {
       const user = resolveUser(users, userRef);
+      const principal = principalOf(user);
       runtime.as(dao.actor, user);
-      const result = await dao.actor.vote(id, choice);
+      const result = await dao.actor.vote(principal, id, choice);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as VoteReceiptLike;
         const proposal = mustProposal(model, id);
         proposal.yesVotes = receipt.yesVotes;
         proposal.noVotes = receipt.noVotes;
-        proposal.votes.set(model.key(principalOf(user)), {
+        proposal.votes.set(model.key(principal), {
           choice: choiceKey(receipt.choice),
           weight: receipt.weight,
         });

@@ -186,6 +186,10 @@ module {
   };
 
   public type SwapError = {
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    };
     #ledgerNotActive : Principal;
     #sameLedger;
     #poolNotFound;
@@ -196,6 +200,10 @@ module {
   };
 
   public type LiquidityError = {
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    };
     #ledgerNotActive : Principal;
     #ledgerNotWhitelisted : Principal;
     #sameLedger;
@@ -232,6 +240,10 @@ module {
   };
 
   public type DustAbandonError = {
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    };
     #ledgerNotWhitelisted : Principal;
     #ledgerNotRetiring : Principal;
     #ledgerHasPools : Principal;

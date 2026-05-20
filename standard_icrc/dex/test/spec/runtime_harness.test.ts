@@ -37,7 +37,9 @@ describe("dex e2e harness", () => {
     const before = await env.runtime.time.nowMs();
 
     await env.runtime.callAs(env.dex.actor, env.alice, async (dex) => {
-      expect(await dex.balances(env.alice.getPrincipal())).toEqual([]);
+      expect(await dex.spi_101_balance({
+        subject: env.alice.getPrincipal(),
+      })).toEqual({ subject: env.alice.getPrincipal(), entries: [] });
     });
     await env.runtime.advanceSeconds(3, { ticks: 2 });
     await env.runtime.block(1);

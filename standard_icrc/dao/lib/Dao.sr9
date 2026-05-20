@@ -308,12 +308,8 @@ module {
     requires true;
   {
     switch (err) {
-      case (#BadBurn(_)) { true };
-      case (#BadFee(_)) { true };
-      case (#CreatedInFuture(_)) { true };
-      case (#TooOld) { true };
-      case (#InsufficientFunds(_)) { true };
-      case (_) { false }
+      case (#Duplicate(_)) { false };
+      case (_) { true }
     }
   };
 
@@ -865,10 +861,11 @@ module {
   private func finishWithdrawRejectImpl(
     dao : State,
     user : Principal,
-    _started : Types.WithdrawStarted,
+    started : Types.WithdrawStarted,
     reject : Types.LedgerReject
   ) : Types.Result<Types.WithdrawReceipt, Types.WithdrawError>
     requires true;
+    requires started.debitAmount == started.amount + started.fee;
     ensures supplyBalanced(dao);
     ensures configValid(dao);
     ensures totalSupply(dao) == old(totalSupply(dao));
@@ -883,7 +880,8 @@ module {
       case (#err(_)) { true }
     };
   {
-    #err(#withdrawReconciliationRejected reject)
+    finishWithdrawFailure(dao, user, started);
+    #err(#ledgerTransferRejected reject)
   };
 
   private func finishWithdrawFailure(
@@ -1577,6 +1575,7 @@ module {
     reject : Types.LedgerReject
   ) : Types.Result<Types.WithdrawReceipt, Types.WithdrawError>
     requires true;
+    requires started.debitAmount == started.amount + started.fee;
     ensures supplyBalanced(dao);
     ensures configValid(dao);
     ensures totalSupply(dao) == old(totalSupply(dao));

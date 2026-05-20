@@ -80,6 +80,13 @@ module {
     out
   };
 
+  public func cachedFee(dex : State, ledger : Principal) : ?Nat
+    requires true;
+    ensures model(dex) == old(model(dex));
+  {
+    LedgerSet.cachedFee(dex.ledgers, ledger)
+  };
+
   public func pools(dex : State) : [Types.PoolInfo]
     requires true;
     ensures model(dex) == old(model(dex));

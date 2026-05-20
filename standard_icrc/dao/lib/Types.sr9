@@ -180,7 +180,11 @@ module {
 
   public type StakeError = {
     #zeroAmount;
-    #insufficientLiquidBalance
+    #insufficientLiquidBalance;
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    }
   };
 
   public type UnstakeError = {
@@ -189,7 +193,11 @@ module {
     #stakeLockedForVote : { activeStake : Nat; lockedStake : Nat };
     #unstakeAlreadyPending;
     #noPendingUnstake;
-    #cooldownActive : { now : Int; unlockAt : Int }
+    #cooldownActive : { now : Int; unlockAt : Int };
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    }
   };
 
   public type ProposalError = {
@@ -197,7 +205,11 @@ module {
     #stakeLockActive : { now : Int; unlockAt : Int };
     #stakeLockedForVote : { activeStake : Nat; lockedStake : Nat };
     #invalidConfigAction;
-    #proposalCapacityReached
+    #proposalCapacityReached;
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    }
   };
 
   public type VoteError = {
@@ -206,7 +218,11 @@ module {
     #noVotingPower;
     #stakeLockActive : { now : Int; unlockAt : Int };
     #votingPeriodEnded : { now : Int; deadline : Int };
-    #alreadyVoted
+    #alreadyVoted;
+    #subjectNotAuthorized : {
+      caller : Principal;
+      subject : Principal
+    }
   };
 
   public type CloseError = {

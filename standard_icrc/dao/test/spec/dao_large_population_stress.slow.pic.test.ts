@@ -157,14 +157,21 @@ describe("dao large population stress", () => {
       const identity = s!.users[user];
       await approve(s!.ledger, identity, s!.dao.canisterId, amount + s!.ledger.fee);
       s!.runtime.as(s!.dao.actor, identity);
-      const receipt = unwrapOk<any>(await s!.dao.actor.deposit(amount));
+      const receipt = unwrapOk<any>(await s!.dao.actor.spi_101_deposit({
+        subject: identity.getPrincipal(),
+        ledger: s!.ledger.canisterId,
+        from: s!.runtime.account(identity),
+        amount,
+      }));
       expect(receipt.amount).toBe(amount);
       state.deposit(user, amount);
     }
 
     async function stake(user: number, amount: bigint): Promise<any> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      const receipt = unwrapOk<any>(await s!.dao.actor.stake(amount));
+      const receipt = unwrapOk<any>(
+        await s!.dao.actor.stake(s!.users[user].getPrincipal(), amount),
+      );
       expect(receipt.amount).toBe(amount);
       state.stake(user, amount);
       return receipt;
@@ -172,7 +179,9 @@ describe("dao large population stress", () => {
 
     async function requestUnstake(user: number, amount: bigint): Promise<any> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      const receipt = unwrapOk<any>(await s!.dao.actor.request_unstake(amount));
+      const receipt = unwrapOk<any>(
+        await s!.dao.actor.request_unstake(s!.users[user].getPrincipal(), amount),
+      );
       expect(receipt.amount).toBe(amount);
       state.requestUnstake(user, amount);
       return receipt;
@@ -180,14 +189,21 @@ describe("dao large population stress", () => {
 
     async function claimUnstaked(user: number): Promise<void> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      const receipt = unwrapOk<any>(await s!.dao.actor.claim_unstaked());
+      const receipt = unwrapOk<any>(
+        await s!.dao.actor.claim_unstaked(s!.users[user].getPrincipal()),
+      );
       expect(receipt.amount).toBe(state.pendingUnstake[user]);
       state.claimUnstaked(user);
     }
 
     async function withdraw(user: number, amount: bigint): Promise<void> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      const receipt = unwrapOk<any>(await s!.dao.actor.withdraw(amount));
+      const receipt = unwrapOk<any>(await s!.dao.actor.spi_101_withdraw({
+        subject: s!.users[user].getPrincipal(),
+        ledger: s!.ledger.canisterId,
+        to: s!.runtime.account(s!.users[user]),
+        amount,
+      }));
       expect(receipt.amount).toBe(amount);
       state.withdraw(user, receipt.debitAmount);
     }
@@ -197,14 +213,16 @@ describe("dao large population stress", () => {
       action: { setQuorum: bigint },
     ): Promise<any> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      const receipt = unwrapOk<any>(await s!.dao.actor.create_proposal(action));
+      const receipt = unwrapOk<any>(
+        await s!.dao.actor.create_proposal(s!.users[user].getPrincipal(), action),
+      );
       state.reserveProposalBond(user, 1n);
       return receipt;
     }
 
     async function vote(user: number, id: bigint): Promise<void> {
       s!.runtime.as(s!.dao.actor, s!.users[user]);
-      unwrapOk(await s!.dao.actor.vote(id, { yes: null }));
+      unwrapOk(await s!.dao.actor.vote(s!.users[user].getPrincipal(), id, { yes: null }));
     }
 
     async function assertTotals(): Promise<void> {

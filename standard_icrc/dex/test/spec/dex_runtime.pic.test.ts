@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ledgerKey, poolKey, stopPocketIcServer, unwrapOk } from "../../../../shared/common/runtime.ts";
+import { poolKey, stopPocketIcServer, unwrapOk } from "../../../../shared/common/runtime.ts";
 import {
   approve,
   balanceOf,
@@ -27,7 +27,9 @@ describe("dex runtime behavior", () => {
   });
 
   test("deploys the DEX and two real ICRC ledgers", async () => {
-    expect(await env.dex.actor.balances(env.alice.getPrincipal())).toEqual([]);
+    expect(await env.dex.actor.spi_101_balance({
+      subject: env.alice.getPrincipal(),
+    })).toEqual({ subject: env.alice.getPrincipal(), entries: [] });
     expect(await env.dex.actor.pools()).toEqual([]);
     expect(await env.ledgerA.actor.icrc1_fee()).toBe(env.ledgerA.fee);
     expect(await env.ledgerB.actor.icrc1_fee()).toBe(env.ledgerB.fee);
@@ -56,12 +58,19 @@ describe("dex runtime behavior", () => {
 
     env.runtime.as(env.dex.actor, env.alice);
     const receipt = unwrapOk<any>(
-      await env.dex.actor.deposit(env.ledgerA.canisterId, 500_000n),
+      await env.dex.actor.spi_101_deposit({
+        subject: env.alice.getPrincipal(),
+        ledger: env.ledgerA.canisterId,
+        from: env.runtime.account(env.alice),
+        amount: 500_000n,
+      }),
     );
-    const balances = await env.dex.actor.balances(env.alice.getPrincipal());
+    const balances = await env.dex.actor.spi_101_balance({
+      subject: env.alice.getPrincipal(),
+    });
 
     expect(receipt.ledger.toText()).toBe(env.ledgerA.canisterId.toText());
     expect(receipt.amount).toBe(500_000n);
-    expect(balances).toEqual([[ledgerKey(env.ledgerA.canisterId), 500_000n]]);
+    expect(balances.entries).toEqual([[env.ledgerA.canisterId, 500_000n]]);
   });
 });

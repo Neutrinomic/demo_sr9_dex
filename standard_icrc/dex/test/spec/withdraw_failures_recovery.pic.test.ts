@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { stopPocketIcServer } from "../../../../shared/common/runtime.ts";
 import {
   createDexScenario,
+  dexBalanceEntries,
   expectErr,
   expectOk,
   type DexScenario,
@@ -43,7 +44,7 @@ describe("withdraw failures and recovery", () => {
 
     expectOk(await s.approveAndDeposit(0, 0, 75_000n));
     expectOk(await s.withdraw(0, 0, 65_000n));
-    expect(await s.dex.actor.balances(s.users[0].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[0].getPrincipal())).toEqual([]);
     await s.assertAll();
   });
 });

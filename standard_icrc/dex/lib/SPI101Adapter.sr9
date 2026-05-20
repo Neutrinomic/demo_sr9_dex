@@ -1,0 +1,245 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import SPI101 "mo:spi/101/DepositWithdrawBalance";
+import Types "./Types";
+import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
+
+module {
+  public pure func ledgerReject() : Types.LedgerReject
+    requires true;
+    ensures result.message == "ledger call rejected";
+  {
+    { message = "ledger call rejected" }
+  };
+
+  public pure func authError(
+    caller : Principal,
+    subject : Principal
+  ) : {
+    caller : Principal;
+    subject : Principal
+  }
+    requires true;
+    ensures result.caller == caller;
+    ensures result.subject == subject;
+  {
+    { caller = caller; subject = subject }
+  };
+
+  public pure func ledgerRejectToSPI(
+    reject : Types.LedgerReject
+  ) : SPI101.LedgerReject
+    requires true;
+    ensures result.message == reject.message;
+  {
+    { message = reject.message }
+  };
+
+  public pure func depositReceipt(
+    subject : Principal,
+    from : ICRCLedger.Account,
+    receipt : Types.DepositReceipt,
+    balanceAfter : Nat
+  ) : SPI101.DepositReceipt
+    requires true;
+    ensures result.subject == subject;
+    ensures result.ledger == receipt.ledger;
+    ensures result.from == from;
+    ensures result.amount == receipt.amount;
+    ensures result.txIndex == receipt.txIndex;
+    ensures result.balanceAfter == balanceAfter;
+  {
+    {
+      ledger = receipt.ledger;
+      from = from;
+      subject = subject;
+      amount = receipt.amount;
+      txIndex = receipt.txIndex;
+      balanceAfter = balanceAfter
+    }
+  };
+
+  public pure func pendingWithdrawal(
+    request : SPI101.WithdrawRequest,
+    fee : Nat
+  ) : SPI101.PendingWithdrawal
+    requires true;
+    ensures result.subject == request.subject;
+    ensures result.ledger == request.ledger;
+    ensures result.amount == request.amount;
+    ensures result.fee == fee;
+    ensures result.debitAmount == request.amount + fee;
+  {
+    {
+      subject = request.subject;
+      ledger = request.ledger;
+      to = request.to;
+      amount = request.amount;
+      fee = fee;
+      debitAmount = request.amount + fee
+    }
+  };
+
+  public pure func withdrawReceipt(
+    subject : Principal,
+    to : ICRCLedger.Account,
+    receipt : Types.WithdrawReceipt,
+    balanceAfter : Nat
+  ) : SPI101.WithdrawReceipt
+    requires receipt.debitAmount == receipt.amount + receipt.fee;
+    ensures result.subject == subject;
+    ensures result.ledger == receipt.ledger;
+    ensures result.to == to;
+    ensures result.amount == receipt.amount;
+    ensures result.fee == receipt.fee;
+    ensures result.debitAmount == receipt.debitAmount;
+    ensures result.debitAmount == result.amount + result.fee;
+    ensures result.txIndex == receipt.txIndex;
+    ensures result.balanceAfter == balanceAfter;
+  {
+    {
+      ledger = receipt.ledger;
+      to = to;
+      subject = subject;
+      amount = receipt.amount;
+      fee = receipt.fee;
+      debitAmount = receipt.debitAmount;
+      txIndex = receipt.txIndex;
+      balanceAfter = balanceAfter
+    }
+  };
+
+  public pure func depositPreError(
+    caller : Principal,
+    request : SPI101.DepositRequest
+  ) : ?SPI101.DepositError
+    requires true;
+    ensures switch (result) {
+      case null {
+        request.amount > 0 and
+        VirtualPrincipal.canControl(caller, request.subject) and
+        request.from.owner == caller
+      };
+      case (?_) { true }
+    };
+  {
+    if (request.amount == 0) {
+      ?#zeroAmount
+    } else if (not VirtualPrincipal.canControl(caller, request.subject)) {
+      ?#subjectNotAuthorized(authError(caller, request.subject))
+    } else if (request.from.owner != caller) {
+      ?#sourceOwnerMismatch({
+        caller = caller;
+        fromOwner = request.from.owner
+      })
+    } else {
+      null
+    }
+  };
+
+  public pure func withdrawPreError(
+    caller : Principal,
+    request : SPI101.WithdrawRequest
+  ) : ?SPI101.WithdrawError
+    requires true;
+    ensures switch (result) {
+      case null {
+        request.amount > 0 and
+        VirtualPrincipal.canControl(caller, request.subject)
+      };
+      case (?_) { true }
+    };
+  {
+    if (request.amount == 0) {
+      ?#zeroAmount
+    } else if (not VirtualPrincipal.canControl(caller, request.subject)) {
+      ?#subjectNotAuthorized(authError(caller, request.subject))
+    } else {
+      null
+    }
+  };
+
+  public pure func transferFromArgs(
+    self : Principal,
+    request : SPI101.DepositRequest
+  ) : ICRCLedger.TransferFromArgs
+    requires true;
+    ensures result.to.owner == self;
+    ensures result.to.subaccount == null;
+    ensures result.fee == null;
+    ensures result.spender_subaccount == null;
+    ensures result.from == request.from;
+    ensures result.memo == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == request.amount;
+  {
+    {
+      to = { owner = self; subaccount = null };
+      fee = null;
+      spender_subaccount = null;
+      from = request.from;
+      memo = null;
+      created_at_time = null;
+      amount = request.amount
+    }
+  };
+
+  public pure func transferArgs(
+    request : SPI101.WithdrawRequest,
+    fee : Nat
+  ) : ICRCLedger.TransferArg
+    requires true;
+    ensures result.to == request.to;
+    ensures result.fee == ?fee;
+    ensures result.memo == null;
+    ensures result.from_subaccount == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == request.amount;
+  {
+    {
+      to = request.to;
+      fee = ?fee;
+      memo = null;
+      from_subaccount = null;
+      created_at_time = null;
+      amount = request.amount
+    }
+  };
+
+  public pure func depositError(err : Types.DepositError) : SPI101.DepositError
+    requires true;
+  {
+    switch (err) {
+      case (#zeroAmount) { #zeroAmount };
+      case (#ledgerNotActive ledger) { #ledgerNotSupported ledger };
+      case (#ledgerTransferFromErr transferErr) {
+        #ledgerTransferFromErr transferErr
+      };
+      case (#ledgerTransferFromRejected reject) {
+        #ledgerTransferFromRejected(ledgerRejectToSPI(reject))
+      }
+    }
+  };
+
+  public pure func withdrawError(
+    err : Types.WithdrawError,
+    request : SPI101.WithdrawRequest,
+    fee : Nat
+  ) : SPI101.WithdrawError
+    requires true;
+  {
+    switch (err) {
+      case (#zeroAmount) { #zeroAmount };
+      case (#ledgerNotWhitelisted ledger) { #ledgerNotSupported ledger };
+      case (#withdrawInProgress) {
+        #withdrawInProgress(pendingWithdrawal(request, fee))
+      };
+      case (#insufficientLocalBalance) { #insufficientLocalBalance };
+      case (#ledgerTransferErr transferErr) {
+        #ledgerTransferErr transferErr
+      };
+      case (#ledgerTransferRejected reject) {
+        #ledgerTransferRejected(ledgerRejectToSPI(reject))
+      }
+    }
+  };
+}

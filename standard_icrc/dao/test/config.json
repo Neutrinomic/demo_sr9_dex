@@ -21,6 +21,12 @@
           "env": "CORE_PACKAGE_PATH",
           "findUp": true,
           "bundledFallback": true
+        },
+        {
+          "name": "spi",
+          "path": "spi",
+          "env": "SPI_PACKAGE_PATH",
+          "findUp": true
         }
       ]
     }

@@ -28,7 +28,7 @@ describe("retired ledger LP exit behavior", () => {
     const added = expectOk<any>(await s.addLiquidity(0, 0, 1, 1_000_000n, 1_000_000n)).added;
 
     expectOk(await s.retireLedger(0));
-    expectErr(await s.deposit(1, 0, 100_000n), "ledgerNotActive");
+    expectErr(await s.deposit(1, 0, 100_000n), "ledgerNotSupported");
     expectErr(await s.swap(0, 0, 1, 10_000n), "ledgerNotActive");
     expectErr(await s.addLiquidity(0, 0, 1, 10_000n, 10_000n), "ledgerNotActive");
 

@@ -61,7 +61,7 @@ describe("dao lifecycle basics", () => {
     const deposit = unwrapOk<any>(await approveAndDeposit(env, env.alice, amount));
     expect(deposit.ledger.toText()).toBe(env.ledger.canisterId.toText());
     expect(deposit.amount).toBe(amount);
-    expect(deposit.liquidBalance).toBe(amount);
+    expect(deposit.balanceAfter).toBe(amount);
 
     expect(await balanceOf(env.ledger, env.dao.canisterId)).toBe(amount);
     expect(await balanceOf(env.ledger, env.alice)).toBe(
@@ -104,7 +104,7 @@ describe("dao lifecycle basics", () => {
 
     env.runtime.as(env.dao.actor, env.alice);
     const created = unwrapOk<any>(
-      await env.dao.actor.create_proposal({ setQuorum: 2n }),
+      await env.dao.actor.create_proposal(env.alice.getPrincipal(), { setQuorum: 2n }),
     );
     expect(created.id).toBe(0n);
     expect(created.proposer.toText()).toBe(env.alice.getPrincipal().toText());
@@ -116,7 +116,9 @@ describe("dao lifecycle basics", () => {
     expect(afterCreate.activeStake).toBe(amount - 1n);
     expect(afterCreate.proposalBond).toBe(1n);
 
-    const voted = unwrapOk<any>(await env.dao.actor.vote(0n, { yes: null }));
+    const voted = unwrapOk<any>(
+      await env.dao.actor.vote(env.alice.getPrincipal(), 0n, { yes: null }),
+    );
     expect(voted.id).toBe(0n);
     expect(voted.voter.toText()).toBe(env.alice.getPrincipal().toText());
     expect(variantKey(voted.choice)).toBe("yes");

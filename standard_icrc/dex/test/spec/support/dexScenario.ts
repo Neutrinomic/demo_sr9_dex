@@ -12,6 +12,7 @@ import {
   unwrapOk,
   variantKey,
 } from "../../../../../shared/common/runtime.ts";
+import { decodeSpi100, encodeSpi100 } from "../../../../../shared/common/spi100.ts";
 import {
   deployDex,
   type DexFixture,
@@ -221,6 +222,7 @@ export class DexModel {
     for (const holder of this.holders(key)) {
       if (
         holder.toText() !== this.controller.toText() &&
+        decodeSpi100(holder) === null &&
         this.balance(holder, key) > amount
       ) {
         return holder;
@@ -386,7 +388,12 @@ export async function createDexScenario(
       const user = resolveCaller(users, userRef);
       const ledger = resolveLedger(ledgers, ledgerRef);
       runtime.as(dex.actor, user);
-      const result = await dex.actor.deposit(ledger.canisterId, amount);
+      const result = await dex.actor.spi_101_deposit({
+        subject: principalOf(user),
+        ledger: ledger.canisterId,
+        from: runtime.account(user),
+        amount,
+      });
       if (hasVariant(result, "ok")) {
         model.credit(principalOf(user), ledger.key, amount);
       }
@@ -408,7 +415,12 @@ export async function createDexScenario(
       const user = resolveCaller(users, userRef);
       const ledger = resolveLedger(ledgers, ledgerRef);
       runtime.as(dex.actor, user);
-      const result = await dex.actor.withdraw(ledger.canisterId, amount);
+      const result = await dex.actor.spi_101_withdraw({
+        subject: principalOf(user),
+        ledger: ledger.canisterId,
+        to: runtime.account(user),
+        amount,
+      });
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as WithdrawReceiptLike;
         model.debit(principalOf(user), ledger.key, receipt.debitAmount);
@@ -432,6 +444,7 @@ export async function createDexScenario(
       const ledgerOut = resolveLedger(ledgers, ledgerOutRef);
       runtime.as(dex.actor, user);
       const result = await dex.actor.swap(
+        principalOf(user),
         ledgerIn.canisterId,
         ledgerOut.canisterId,
         amountIn,
@@ -454,7 +467,7 @@ export async function createDexScenario(
       const ledgerA = resolveLedger(ledgers, ledgerARef);
       const ledgerB = resolveLedger(ledgers, ledgerBRef);
       runtime.as(dex.actor, user);
-      const result = await dex.actor.liquidity({
+      const result = await dex.actor.liquidity(principalOf(user), {
         add: {
           ledgerA: ledgerA.canisterId,
           ledgerB: ledgerB.canisterId,
@@ -480,7 +493,7 @@ export async function createDexScenario(
       const ledgerA = resolveLedger(ledgers, ledgerARef);
       const ledgerB = resolveLedger(ledgers, ledgerBRef);
       runtime.as(dex.actor, user);
-      const result = await dex.actor.liquidity({
+      const result = await dex.actor.liquidity(principalOf(user), {
         rem: {
           ledgerA: ledgerA.canisterId,
           ledgerB: ledgerB.canisterId,
@@ -526,7 +539,7 @@ export async function createDexScenario(
       const user = resolveCaller(users, userRef);
       const ledger = resolveLedger(ledgers, ledgerRef);
       runtime.as(dex.actor, user);
-      const result = await dex.actor.abandonDust(ledger.canisterId);
+      const result = await dex.actor.abandonDust(principalOf(user), ledger.canisterId);
       if (hasVariant(result, "ok")) {
         const receipt = result.ok as DustReceiptLike;
         model.debit(principalOf(user), ledger.key, receipt.abandonedAmount);
@@ -726,8 +739,15 @@ async function assertUserBalances(
   scenario: DexScenario,
   user: Principal,
 ): Promise<void> {
-  const actual = sortEntries(await scenario.dex.actor.balances(user));
-  const expected = scenario.model.entries(user);
+  const receipt = await scenario.dex.actor.spi_101_balance({ subject: user });
+  expect(receipt.subject.toText()).toBe(user.toText());
+  const actual = sortPrincipalEntries(receipt.entries);
+  const expected = sortPrincipalEntries(
+    scenario.model.entries(user).map(([key, amount]) => [
+      balancePrincipalForKey(scenario, key),
+      amount,
+    ]),
+  );
   expect(actual).toEqual(expected);
 }
 
@@ -871,6 +891,37 @@ function recordKey(user: Principal, key: string): string {
 
 function sortEntries(entries: Array<[string, bigint]>): Array<[string, bigint]> {
   return [...entries].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function sortPrincipalEntries(entries: Array<[Principal, bigint]>): Array<[string, bigint]> {
+  return [...entries]
+    .map(([principal, amount]) => [principal.toText(), amount] as [string, bigint])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+export async function dexBalanceEntries(
+  scenario: DexScenario,
+  user: Principal,
+): Promise<Array<[string, bigint]>> {
+  const receipt = await scenario.dex.actor.spi_101_balance({ subject: user });
+  return sortPrincipalEntries(receipt.entries);
+}
+
+export function balancePrincipalForKey(scenario: DexScenario, key: string): Principal {
+  for (const ledger of scenario.ledgers) {
+    if (ledger.key === key) {
+      return ledger.canisterId;
+    }
+  }
+  const pool = scenario.model.pools.get(key);
+  if (pool !== undefined) {
+    const principal = encodeSpi100(scenario.dex.canisterId, pool.id);
+    if (principal === null) {
+      throw new Error(`DEX principal cannot encode SPI-100 pool id ${pool.id}`);
+    }
+    return principal;
+  }
+  throw new Error(`unknown DEX balance key ${key}`);
 }
 
 function normalizePoolInfo(info: PoolInfoLike): PoolInfoLike {

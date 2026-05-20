@@ -35,14 +35,14 @@ describe("dao withdrawal security", () => {
     const aliceAfterDeposit = await balanceOf(env.ledger, env.alice);
 
     expectErrKey(await withdraw(env, env.alice, 0n), "zeroAmount");
-    expectErrKey(await withdraw(env, env.alice, amount), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.alice, amount), "insufficientLocalBalance");
     expect((await env.dao.actor.stake_info(env.alice.getPrincipal())).liquid).toBe(amount);
 
     const receipt = unwrapOk<any>(await withdraw(env, env.alice, amount - env.ledger.fee));
     expect(receipt.amount).toBe(amount - env.ledger.fee);
     expect(receipt.fee).toBe(env.ledger.fee);
     expect(receipt.debitAmount).toBe(amount);
-    expect(receipt.liquidBalance).toBe(0n);
+    expect(receipt.balanceAfter).toBe(0n);
     expect(await env.dao.actor.dao_totals()).toEqual({
       totalSupply: 0n,
       totalLiquid: 0n,
@@ -76,11 +76,11 @@ describe("dao withdrawal security", () => {
     unwrapOk(await approveAndDeposit(env, env.alice, amount));
     unwrapOk(await stake(env, env.alice, amount));
 
-    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLocalBalance");
     const requested = unwrapOk<any>(await requestUnstake(env, env.alice, amount));
     expect(requested.activeStake).toBe(0n);
     expect(requested.pendingUnstake).toBe(amount);
-    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLocalBalance");
     expectErrKey(await claimUnstaked(env, env.alice), "cooldownActive");
 
     await env.runtime.advanceSeconds(VOTING_LOCK_SECONDS + 1n, { ticks: 3 });
@@ -97,8 +97,18 @@ describe("dao withdrawal security", () => {
     env.runtime.as(env.dao.actor, env.alice);
 
     const results = await Promise.all([
-      env.dao.actor.withdraw(amount - env.ledger.fee),
-      env.dao.actor.withdraw(amount - env.ledger.fee),
+      env.dao.actor.spi_101_withdraw({
+        subject: env.alice.getPrincipal(),
+        ledger: env.ledger.canisterId,
+        to: env.runtime.account(env.alice),
+        amount: amount - env.ledger.fee,
+      }),
+      env.dao.actor.spi_101_withdraw({
+        subject: env.alice.getPrincipal(),
+        ledger: env.ledger.canisterId,
+        to: env.runtime.account(env.alice),
+        amount: amount - env.ledger.fee,
+      }),
     ]);
     expect(results.filter((result) => "ok" in (result as object))).toHaveLength(1);
     expect(results.filter((result) => "err" in (result as object))).toHaveLength(1);

@@ -3,6 +3,7 @@ import BSeq "mo:core/pure/BSeq";
 import Principal "mo:core/Principal";
 import Profile "./Profile";
 import Text "mo:core/Text";
+import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
 
 module {
   public type BalanceEntry = (Text, Nat);
@@ -337,6 +338,7 @@ module {
       case null { true };
       case (?user) {
         user != controller and
+        not VirtualPrincipal.isVirtual(user) and
         holderMatches(book, key, user) and
         holderAbove(book, key, user, amount)
       }
@@ -352,7 +354,7 @@ module {
       loop:invariant book.seen == old(book.seen);
       let user = holderList[i];
       let balance = mapGet(book.balances, recordKey(user, key));
-      if (user != controller and balance > amount) {
+      if (user != controller and not VirtualPrincipal.isVirtual(user) and balance > amount) {
         assert holderMatches(book, key, user);
         assert holderAbove(book, key, user, amount);
         Profile.mark("dex:BalanceBook:firstHolderAbove:end");

@@ -76,11 +76,14 @@ describe("dao staking and vote locks", () => {
     const requested = unwrapOk<any>(await requestUnstake(env, env.alice, 4n));
     expect(requested.activeStake).toBe(6n);
     expect(requested.pendingUnstake).toBe(4n);
-    expectErrKey(await env.dao.actor.claim_unstaked(), "cooldownActive");
+    env.runtime.as(env.dao.actor, env.alice);
+    expectErrKey(await env.dao.actor.claim_unstaked(env.alice.getPrincipal()), "cooldownActive");
     expectErrKey(await requestUnstake(env, env.alice, 1n), "unstakeAlreadyPending");
 
     await setTimeNanos(env, requested.unlockAt);
-    const claimed = unwrapOk<any>(await env.dao.actor.claim_unstaked());
+    const claimed = unwrapOk<any>(
+      await env.dao.actor.claim_unstaked(env.alice.getPrincipal()),
+    );
     expect(claimed.amount).toBe(4n);
     expect(claimed.liquidBalance).toBe(4n);
     expect((await env.dao.actor.stake_info(env.alice.getPrincipal())).pendingUnstake).toBe(0n);

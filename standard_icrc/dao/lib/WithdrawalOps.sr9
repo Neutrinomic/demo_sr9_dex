@@ -243,12 +243,8 @@ module {
     requires true;
   {
     switch (err) {
-      case (#BadBurn(_)) { true };
-      case (#BadFee(_)) { true };
-      case (#CreatedInFuture(_)) { true };
-      case (#TooOld) { true };
-      case (#InsufficientFunds(_)) { true };
-      case (_) { false }
+      case (#Duplicate(_)) { false };
+      case (_) { true }
     }
   };
 }

@@ -3,6 +3,7 @@ import { stopPocketIcServer } from "../../../../shared/common/runtime.ts";
 import { approve } from "../../../../shared/fixtures/icrc_ledger/ledgerHarness.ts";
 import {
   createDexScenario,
+  dexBalanceEntries,
   expectErr,
   expectOk,
   type DexScenario,
@@ -23,7 +24,7 @@ describe("deposit failures", () => {
   test("failed deposit paths never create local credit", async () => {
     s = await createDexScenario({ name: "deposit-failures", ledgerCount: 2, userCount: 2 });
 
-    expectErr(await s.deposit(0, 0, 10_000n), "ledgerNotActive");
+    expectErr(await s.deposit(0, 0, 10_000n), "ledgerNotSupported");
     expectOk(await s.whitelistLedger(0));
     expectErr(await s.deposit(0, 0, 0n), "zeroAmount");
     expectErr(await s.deposit(0, 0, 50_000n), "ledgerTransferFromErr");
@@ -33,7 +34,7 @@ describe("deposit failures", () => {
     expectErr(await s.deposit(0, 0, 50_000n, { checkExternal: false }), "ledgerTransferFromRejected");
     await s.runtime.startCanister(s.ledgers[0].canisterId);
 
-    expect(await s.dex.actor.balances(s.users[0].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[0].getPrincipal())).toEqual([]);
     await s.assertLedgerObligation(0);
   });
 
@@ -49,7 +50,7 @@ describe("deposit failures", () => {
     await s.fund(0, 0, s.ledgers[0].fee);
     await approve(s.ledgers[0], s.users[0], s.dex.canisterId, 1_000_000n);
     expectErr(await s.deposit(0, 0, 900_000n), "ledgerTransferFromErr");
-    expect(await s.dex.actor.balances(s.users[0].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[0].getPrincipal())).toEqual([]);
     await s.assertLedgerObligation(0);
   });
 });

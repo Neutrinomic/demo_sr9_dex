@@ -124,7 +124,7 @@ describe("dao multi-identity scenarios", () => {
     expectErrKey(await s.vote(2, proposal.id, { yes: null }), "stakeLockActive");
     expectErrKey(await s.createProposal(2, { setQuorum: 1n }), "stakeLockActive");
     expectErrKey(await s.vote(5, proposal.id, { yes: null }), "noVotingPower");
-    expectErrKey(await s.withdraw(5, 1n), "insufficientLiquidBalance");
+    expectErrKey(await s.withdraw(5, 1n), "insufficientLocalBalance");
 
     unwrapOk(await s.vote(3, proposal.id, { yes: null }));
     unwrapOk(await s.vote(4, proposal.id, { no: null }));

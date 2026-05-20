@@ -12,6 +12,7 @@ import {
   type DaoE2E,
   expectErrKey,
   setupDaoE2E,
+  stake,
   withdraw,
 } from "./daoTestEnv.ts";
 
@@ -54,7 +55,7 @@ describe("dao deposit security", () => {
     expect(await balanceOf(env.ledger, env.dao.canisterId)).toBe(0n);
     const receipt = unwrapOk<any>(await deposit(env, env.alice, 50_000n));
     expect(receipt.amount).toBe(50_000n);
-    expect(receipt.liquidBalance).toBe(50_000n);
+    expect(receipt.balanceAfter).toBe(50_000n);
   });
 
   test("one-use allowance and concurrent deposit attempts credit only once", async () => {
@@ -85,12 +86,11 @@ describe("dao deposit security", () => {
     unwrapOk(await approveAndDeposit(env, env.alice, amount));
 
     expectErrKey(await deposit(env, env.bob, 50_000n), "ledgerTransferFromErr");
-    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLocalBalance");
 
-    env.runtime.as(env.dao.actor, env.bob);
-    expectErrKey(await env.dao.actor.stake(1n), "insufficientLiquidBalance");
-    expectErrKey(await env.dao.actor.request_unstake(1n), "insufficientActiveStake");
-    expectErrKey(await env.dao.actor.retry_withdrawal(), "noPendingWithdrawal");
+    expectErrKey(await stake(env, env.bob, 1n), "insufficientLiquidBalance");
+    expectErrKey(await env.dao.actor.request_unstake(env.bob.getPrincipal(), 1n), "insufficientActiveStake");
+    expect(await env.dao.actor.pending_withdrawal(env.bob.getPrincipal())).toEqual([]);
 
     expect((await env.dao.actor.stake_info(env.alice.getPrincipal())).liquid).toBe(amount);
     expect((await env.dao.actor.stake_info(env.bob.getPrincipal())).liquid).toBe(0n);
@@ -121,8 +121,8 @@ describe("dao deposit security", () => {
 
     expect(await balanceOf(env.ledger, env.dao.canisterId)).toBe(directAmount);
     expect(await env.dao.actor.dao_totals()).toEqual(ZERO_TOTALS);
-    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLiquidBalance");
-    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLiquidBalance");
+    expectErrKey(await withdraw(env, env.alice, 1n), "insufficientLocalBalance");
+    expectErrKey(await withdraw(env, env.bob, 1n), "insufficientLocalBalance");
 
     const depositAmount = 100_000n;
     unwrapOk(await approveAndDeposit(env, env.alice, depositAmount));

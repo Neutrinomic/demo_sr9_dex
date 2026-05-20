@@ -25,9 +25,15 @@ describe("concurrent withdraw double-spend attempts", () => {
     expectOk(await s.approveAndDeposit(0, 0, 100_000n));
 
     s.runtime.as(s.dex.actor, s.users[0]);
+    const withdraw = {
+      subject: s.users[0].getPrincipal(),
+      ledger: s.ledgers[0].canisterId,
+      to: s.runtime.account(s.users[0]),
+      amount: 60_000n,
+    };
     const [first, second] = await Promise.all([
-      s.dex.actor.withdraw(s.ledgers[0].canisterId, 60_000n),
-      s.dex.actor.withdraw(s.ledgers[0].canisterId, 60_000n),
+      s.dex.actor.spi_101_withdraw(withdraw),
+      s.dex.actor.spi_101_withdraw(withdraw),
     ]);
 
     const results = [first, second];

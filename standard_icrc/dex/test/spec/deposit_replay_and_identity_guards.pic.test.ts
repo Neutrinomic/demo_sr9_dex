@@ -3,6 +3,7 @@ import { ledgerKey, stopPocketIcServer } from "../../../../shared/common/runtime
 import { approve } from "../../../../shared/fixtures/icrc_ledger/ledgerHarness.ts";
 import {
   createDexScenario,
+  dexBalanceEntries,
   expectErr,
   expectOk,
   type DexScenario,
@@ -38,7 +39,7 @@ describe("deposit replay and caller identity guards", () => {
 
     await approve(s.ledgers[0], s.users[0], s.dex.canisterId, 110_000n);
     expectErr(await s.deposit(1, 0, 100_000n), "ledgerTransferFromErr");
-    expect(await s.dex.actor.balances(s.users[1].getPrincipal())).toEqual([]);
+    expect(await dexBalanceEntries(s, s.users[1].getPrincipal())).toEqual([]);
 
     expectOk(await s.deposit(0, 0, 100_000n));
     await s.assertAll();

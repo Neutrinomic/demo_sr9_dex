@@ -1,19 +1,33 @@
+type WithdrawRequest = 
+ record {
+   amount: nat;
+   ledger: principal;
+   subject: principal;
+   to: Account;
+ };
 type WithdrawReceipt = 
  record {
    amount: nat;
-   balanceKey: text;
+   balanceAfter: nat;
    debitAmount: nat;
    fee: nat;
    ledger: principal;
+   subject: principal;
+   to: Account;
    txIndex: nat;
  };
 type WithdrawError = 
  variant {
    insufficientLocalBalance;
-   ledgerNotWhitelisted: principal;
+   ledgerFeeRejected: LedgerReject;
+   ledgerNotSupported: principal;
    ledgerTransferErr: TransferError;
    ledgerTransferRejected: LedgerReject;
-   withdrawInProgress;
+   subjectNotAuthorized: record {
+                           caller: principal;
+                           subject: principal;
+                         };
+   withdrawInProgress: PendingWithdrawal;
    zeroAmount;
  };
 type TransferFromError = 
@@ -69,6 +83,10 @@ type SwapError =
    poolNotFound;
    sameLedger;
    slippage;
+   subjectNotAuthorized: record {
+                           caller: principal;
+                           subject: principal;
+                         };
    zeroAmount;
  };
 type ReturnLedgerBalancesReceipt = 
@@ -100,55 +118,55 @@ type ReturnLedgerBalancesError =
                                    fee: nat;
                                  };
  };
-type Result_9 = 
- variant {
-   err: DustAbandonError;
-   ok: DustAbandonReceipt;
- };
-type Result_8 = 
- variant {
-   err: ControllerLedgerError;
-   ok;
- };
-type Result_7 = 
- variant {
-   err: CreatePoolError;
-   ok: PoolInfo;
- };
-type Result_6 = 
+type Result__1_1 = 
  variant {
    err: DepositError;
    ok: DepositReceipt;
  };
+type Result__1 = 
+ variant {
+   err: WithdrawError;
+   ok: WithdrawReceipt;
+ };
+type Result_7 = 
+ variant {
+   err: DustAbandonError;
+   ok: DustAbandonReceipt;
+ };
+type Result_6 = 
+ variant {
+   err: ControllerLedgerError;
+   ok;
+ };
 type Result_5 = 
+ variant {
+   err: CreatePoolError;
+   ok: PoolInfo;
+ };
+type Result_4 = 
  variant {
    err: LiquidityError;
    ok: LiquidityReceipt;
  };
-type Result_4 = 
+type Result_3 = 
  variant {
    err: QuoteError;
    ok: QuoteReceipt;
  };
-type Result_3 = 
+type Result_2 = 
  variant {
    err: RemovePoolError;
    ok: RemovePoolReceipt;
  };
-type Result_2 = 
+type Result_1 = 
  variant {
    err: ReturnLedgerBalancesError;
    ok: ReturnLedgerBalancesReceipt;
  };
-type Result_1 = 
+type Result = 
  variant {
    err: SwapError;
    ok: SwapReceipt;
- };
-type Result = 
- variant {
-   err: WithdrawError;
-   ok: WithdrawReceipt;
  };
 type RemovePoolReceipt = 
  record {
@@ -212,6 +230,15 @@ type PoolInfo =
    reserveB: nat;
    totalShares: nat;
  };
+type PendingWithdrawal = 
+ record {
+   amount: nat;
+   debitAmount: nat;
+   fee: nat;
+   ledger: principal;
+   subject: principal;
+   to: Account;
+ };
 type LiquidityRequest = 
  variant {
    add:
@@ -245,6 +272,10 @@ type LiquidityError =
    poolNotFound;
    sameLedger;
    slippage;
+   subjectNotAuthorized: record {
+                           caller: principal;
+                           subject: principal;
+                         };
    zeroAmount;
  };
 type LedgerReject = record {message: text;};
@@ -268,39 +299,61 @@ type DustAbandonError =
    ledgerNotRetiring: principal;
    ledgerNotWhitelisted: principal;
    noLocalBalance;
+   subjectNotAuthorized: record {
+                           caller: principal;
+                           subject: principal;
+                         };
  };
 type DexActorDemo = 
  service {
-   abandonDust: (ledger: principal) -> (Result_9);
-   balances: (user: principal) -> (vec record {
-                                         text;
-                                         nat;
-                                       }) query;
-   controller_ledger: (action: ControllerLedgerAction) -> (Result_8);
-   createPool: (ledgerA: principal, ledgerB: principal) -> (Result_7);
-   deposit: (ledger: principal, amount: nat) -> (Result_6);
-   liquidity: (request: LiquidityRequest) -> (Result_5);
+   abandonDust: (subject: principal, ledger: principal) -> (Result_7);
+   controller_ledger: (action: ControllerLedgerAction) -> (Result_6);
+   createPool: (ledgerA: principal, ledgerB: principal) -> (Result_5);
+   liquidity: (subject: principal, request: LiquidityRequest) -> (Result_4);
    pools: () -> (vec PoolInfo) query;
    quote: (ledgerIn: principal, ledgerOut: principal, amountIn: nat,
-    minAmountOut: nat) -> (Result_4) query;
-   removePool: (ledgerA: principal, ledgerB: principal) -> (Result_3);
-   returnLedgerBalances: (ledger: principal) -> (Result_2);
-   swap: (ledgerIn: principal, ledgerOut: principal, amountIn: nat,
-    minAmountOut: nat) -> (Result_1);
-   withdraw: (ledger: principal, amount: nat) -> (Result);
+    minAmountOut: nat) -> (Result_3) query;
+   removePool: (ledgerA: principal, ledgerB: principal) -> (Result_2);
+   returnLedgerBalances: (ledger: principal) -> (Result_1);
+   spi_101_balance: (request: BalanceRequest) -> (BalanceReceipt) query;
+   spi_101_deposit: (request: DepositRequest) -> (Result__1_1);
+   spi_101_withdraw: (request: WithdrawRequest) -> (Result__1);
+   swap: (subject: principal, ledgerIn: principal, ledgerOut: principal,
+    amountIn: nat, minAmountOut: nat) -> (Result);
+ };
+type DepositRequest = 
+ record {
+   amount: nat;
+   from: Account;
+   ledger: principal;
+   subject: principal;
  };
 type DepositReceipt = 
  record {
    amount: nat;
-   balanceKey: text;
+   balanceAfter: nat;
+   from: Account;
    ledger: principal;
+   subject: principal;
    txIndex: nat;
  };
 type DepositError = 
  variant {
-   ledgerNotActive: principal;
+   amountTooLow: record {
+                   amount: nat;
+                   minAmount: nat;
+                 };
+   ledgerNotSupported: principal;
    ledgerTransferFromErr: TransferFromError;
    ledgerTransferFromRejected: LedgerReject;
+   sourceOwnerMismatch: record {
+                          caller: principal;
+                          fromOwner: principal;
+                        };
+   subjectNotAuthorized: record {
+                           caller: principal;
+                           subject: principal;
+                         };
    zeroAmount;
  };
 type CreatePoolError = 
@@ -328,6 +381,18 @@ type ControllerLedgerAction =
    rem: principal;
    retire: principal;
  };
+type BalanceRequest = record {subject: principal;};
+type BalanceReceipt = 
+ record {
+   entries: vec BalanceEntry;
+   subject: principal;
+ };
+type BalanceKey = principal;
+type BalanceEntry = 
+ record {
+   BalanceKey;
+   nat;
+ };
 type AddLiquidityReceipt = 
  record {
    ledgerA: principal;
@@ -339,5 +404,10 @@ type AddLiquidityReceipt =
    shares: nat;
    usedA: nat;
    usedB: nat;
+ };
+type Account = 
+ record {
+   owner: principal;
+   subaccount: opt blob;
  };
 service : (controller: principal) -> DexActorDemo
