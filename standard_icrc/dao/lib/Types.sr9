@@ -1,0 +1,224 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+
+module {
+  public type Result<Ok, Err> = { #ok : Ok; #err : Err };
+
+  public type LedgerReject = {
+    message : Text
+  };
+
+  public type VoteChoice = { #yes; #no };
+  public type ProposalStatus = { #open; #passed; #failed; #executed; #stale };
+
+  public type Config = {
+    quorumVotes : Nat;
+    proposalThreshold : Nat
+  };
+
+  public type ConfigAction = {
+    #setQuorum : Nat;
+    #setProposalThreshold : Nat;
+    #setConfig : Config
+  };
+
+  public type Proposal = {
+    id : Nat;
+    proposer : Text;
+    action : ConfigAction;
+    yesVotes : Nat;
+    noVotes : Nat;
+    quorumVotes : Nat;
+    snapshotActiveStake : Nat;
+    configVersion : Nat;
+    bond : Nat;
+    createdAt : Int;
+    deadline : Int;
+    status : ProposalStatus
+  };
+
+  public type DaoTotals = {
+    totalSupply : Nat;
+    totalLiquid : Nat;
+    totalActiveStake : Nat;
+    totalPendingUnstake : Nat;
+    totalPendingWithdraw : Nat;
+    totalProposalBonds : Nat
+  };
+
+  public type ProposalWindow = {
+    nextProposalId : Nat;
+    maxProposals : Nat
+  };
+
+  public type VoteInfo = {
+    hasVoted : Bool;
+    choice : ?VoteChoice;
+    voteWeight : Nat;
+    lockedStake : Nat
+  };
+
+  public type StakeInfo = {
+    liquid : Nat;
+    activeStake : Nat;
+    proposalBond : Nat;
+    pendingUnstake : Nat;
+    pendingWithdraw : Nat;
+    activeVoteLock : Nat;
+    votingPowerUnlockAt : ?Int;
+    unlockAt : ?Int
+  };
+
+  public type PendingUnstake = {
+    amount : Nat;
+    unlockAt : Int
+  };
+
+  public type PendingWithdrawal = {
+    operationId : Nat;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    createdAtTime : Nat
+  };
+
+  public type DepositReceipt = {
+    ledger : Principal;
+    amount : Nat;
+    txIndex : Nat;
+    liquidBalance : Nat
+  };
+
+  public type WithdrawReceipt = {
+    operationId : Nat;
+    ledger : Principal;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    txIndex : Nat;
+    liquidBalance : Nat
+  };
+
+  public type WithdrawStarted = {
+    operationId : Nat;
+    ledger : Principal;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    createdAtTime : Nat
+  };
+
+  public type StakeReceipt = {
+    amount : Nat;
+    liquidBalance : Nat;
+    activeStake : Nat;
+    votingPowerUnlockAt : Int
+  };
+
+  public type RequestUnstakeReceipt = {
+    amount : Nat;
+    activeStake : Nat;
+    pendingUnstake : Nat;
+    unlockAt : Int
+  };
+
+  public type ClaimUnstakeReceipt = {
+    amount : Nat;
+    liquidBalance : Nat
+  };
+
+  public type ProposalReceipt = {
+    id : Nat;
+    proposer : Principal;
+    quorumVotes : Nat;
+    snapshotActiveStake : Nat;
+    configVersion : Nat;
+    createdAt : Int;
+    deadline : Int
+  };
+
+  public type VoteReceipt = {
+    id : Nat;
+    voter : Principal;
+    choice : VoteChoice;
+    weight : Nat;
+    yesVotes : Nat;
+    noVotes : Nat
+  };
+
+  public type CloseReceipt = {
+    id : Nat;
+    status : ProposalStatus;
+    yesVotes : Nat;
+    noVotes : Nat;
+    quorumVotes : Nat
+  };
+
+  public type ExecuteReceipt = {
+    id : Nat;
+    config : Config;
+    configVersion : Nat;
+    applied : Bool
+  };
+
+  public type DepositError = {
+    #zeroAmount;
+    #ledgerTransferFromErr : ICRCLedger.TransferFromError;
+    #ledgerTransferFromRejected : LedgerReject
+  };
+
+  public type WithdrawError = {
+    #zeroAmount;
+    #withdrawInProgress;
+    #noPendingWithdrawal;
+    #insufficientLiquidBalance;
+    #ledgerFeeRejected : LedgerReject;
+    #ledgerTransferErr : ICRCLedger.TransferError;
+    #ledgerTransferRejected : LedgerReject;
+    #withdrawReconciliationRequired : ICRCLedger.TransferError;
+    #withdrawReconciliationRejected : LedgerReject
+  };
+
+  public type StakeError = {
+    #zeroAmount;
+    #insufficientLiquidBalance
+  };
+
+  public type UnstakeError = {
+    #zeroAmount;
+    #insufficientActiveStake;
+    #stakeLockedForVote : { activeStake : Nat; lockedStake : Nat };
+    #unstakeAlreadyPending;
+    #noPendingUnstake;
+    #cooldownActive : { now : Int; unlockAt : Int }
+  };
+
+  public type ProposalError = {
+    #proposalThresholdNotMet;
+    #stakeLockActive : { now : Int; unlockAt : Int };
+    #stakeLockedForVote : { activeStake : Nat; lockedStake : Nat };
+    #invalidConfigAction;
+    #proposalCapacityReached
+  };
+
+  public type VoteError = {
+    #proposalNotFound;
+    #proposalNotOpen;
+    #noVotingPower;
+    #stakeLockActive : { now : Int; unlockAt : Int };
+    #votingPeriodEnded : { now : Int; deadline : Int };
+    #alreadyVoted
+  };
+
+  public type CloseError = {
+    #proposalNotFound;
+    #proposalNotOpen;
+    #votingPeriodActive : { now : Int; deadline : Int }
+  };
+
+  public type ExecuteError = {
+    #proposalNotFound;
+    #proposalNotPassed;
+    #alreadyExecuted;
+    #invalidConfigAction
+  };
+}

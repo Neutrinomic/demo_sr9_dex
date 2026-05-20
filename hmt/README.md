@@ -1,7 +1,7 @@
-# SR9 Token References
+# HMT Blueprints
 
-This is a placeholder for reference projects built around SR9's
-inter-canister token system.
+This is a placeholder for protocol foundation blueprints built around the
+HMT, Hash Module Tokens, inter-canister asset system.
 
 Those projects will use SR9-native token flows instead of the standard ICRC
 deposit, withdraw, and local-balance boundary used by `standard_icrc/`.

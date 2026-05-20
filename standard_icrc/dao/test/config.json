@@ -1,0 +1,28 @@
+{
+  "workspaceRoot": "../../..",
+  "actorFixturesDir": "fixtures/actors",
+  "defaultActor": "dao",
+  "test": {
+    "specGlob": "spec/**/*.test.ts",
+    "timeoutMs": 240000,
+    "reportsDir": "reports",
+    "exceptionsFile": "exceptions.ts"
+  },
+  "actors": {
+    "dao": {
+      "name": "DaoActorDemo",
+      "source": "../DaoActorDemo.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        {
+          "name": "core",
+          "path": "core/src",
+          "env": "CORE_PACKAGE_PATH",
+          "findUp": true,
+          "bundledFallback": true
+        }
+      ]
+    }
+  }
+}

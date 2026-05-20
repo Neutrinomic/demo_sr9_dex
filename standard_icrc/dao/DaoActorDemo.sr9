@@ -1,0 +1,447 @@
+import Dao "./lib/Dao";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import NatCore "mo:core/Nat";
+import Prim "mo:⛔";
+import Runtime "mo:core/Runtime";
+import Text "mo:core/Text";
+import Time "mo:core/Time";
+import Types "./lib/Types";
+import WithdrawalOps "./lib/WithdrawalOps";
+
+persistent actor class DaoActorDemo(
+  governanceLedger : Principal,
+  initialQuorumVotes : Nat,
+  initialProposalThreshold : Nat
+) {
+  public type Result<Ok, Err> = Types.Result<Ok, Err>;
+  public type Config = Types.Config;
+  public type ConfigAction = Types.ConfigAction;
+  public type DaoTotals = Types.DaoTotals;
+  public type Proposal = Types.Proposal;
+  public type ProposalWindow = Types.ProposalWindow;
+  public type PendingWithdrawal = Types.PendingWithdrawal;
+  public type StakeInfo = Types.StakeInfo;
+  public type VoteChoice = Types.VoteChoice;
+  public type VoteInfo = Types.VoteInfo;
+  public type DepositReceipt = Types.DepositReceipt;
+  public type WithdrawReceipt = Types.WithdrawReceipt;
+  public type StakeReceipt = Types.StakeReceipt;
+  public type RequestUnstakeReceipt = Types.RequestUnstakeReceipt;
+  public type ClaimUnstakeReceipt = Types.ClaimUnstakeReceipt;
+  public type ProposalReceipt = Types.ProposalReceipt;
+  public type VoteReceipt = Types.VoteReceipt;
+  public type CloseReceipt = Types.CloseReceipt;
+  public type ExecuteReceipt = Types.ExecuteReceipt;
+  public type DepositError = Types.DepositError;
+  public type WithdrawError = Types.WithdrawError;
+  public type StakeError = Types.StakeError;
+  public type UnstakeError = Types.UnstakeError;
+  public type ProposalError = Types.ProposalError;
+  public type VoteError = Types.VoteError;
+  public type CloseError = Types.CloseError;
+  public type ExecuteError = Types.ExecuteError;
+
+  var dao : Dao.State = Dao.init(
+    governanceLedger,
+    initialQuorumVotes,
+    initialProposalThreshold
+  );
+  var withdrawOps : WithdrawalOps.State = WithdrawalOps.init();
+
+  invariant WithdrawalOps.valid(withdrawOps);
+
+  private let NAT64_MAX : Nat = 18_446_744_073_709_551_615;
+  private let NAT64_MAX_VALUE : Nat64 = 18_446_744_073_709_551_615;
+
+  private pure func ledgerReject() : Types.LedgerReject {
+    { message = "ledger call rejected" }
+  };
+
+  private func ledgerCreatedAtTime() : Nat64
+    reads NAT64_MAX_VALUE
+    requires true;
+    ensures result <= NAT64_MAX_VALUE;
+  {
+    Prim.time()
+  };
+
+  private func ledgerCreatedAtTimeNat(time : Nat64) : Nat
+    reads NAT64_MAX, NAT64_MAX_VALUE
+    requires time <= NAT64_MAX_VALUE;
+    ensures result <= NAT64_MAX;
+  {
+    Prim.nat64ToNat(time)
+  };
+
+  private func natToLedgerCreatedAtTime(time : Nat) : Nat64
+    reads NAT64_MAX, NAT64_MAX_VALUE
+    requires time <= NAT64_MAX;
+    ensures result <= NAT64_MAX_VALUE;
+  {
+    Prim.natToNat64(time)
+  };
+
+  private func operationMemo(kind : Text, operationId : Nat) : Blob
+    requires true;
+    ensures true;
+  {
+    Text.encodeUtf8("dao:" # kind # ":" # NatCore.toText(operationId))
+  };
+
+  private func depositTransferFromArgs(
+    caller : Principal,
+    amount : Nat,
+    operationId : Nat,
+    createdAtTime : Nat64
+  ) : ICRCLedger.TransferFromArgs
+    requires true;
+    ensures result.to.owner == Runtime.selfId();
+    ensures result.to.subaccount == null;
+    ensures result.from.owner == caller;
+    ensures result.from.subaccount == null;
+    ensures result.spender_subaccount == null;
+    ensures result.fee == null;
+    ensures switch (result.memo) { case (?_) { true }; case null { false } };
+    ensures result.created_at_time == ?createdAtTime;
+    ensures result.amount == amount;
+  {
+    {
+      to = { owner = Runtime.selfId(); subaccount = null };
+      fee = null;
+      spender_subaccount = null;
+      from = { owner = caller; subaccount = null };
+      memo = ?operationMemo("deposit", operationId);
+      created_at_time = ?createdAtTime;
+      amount = amount
+    }
+  };
+
+  private func withdrawTransferArgs(
+    caller : Principal,
+    started : Types.WithdrawStarted
+  ) : ICRCLedger.TransferArg
+    reads NAT64_MAX, NAT64_MAX_VALUE
+    requires started.createdAtTime <= NAT64_MAX;
+    ensures result.to.owner == caller;
+    ensures result.to.subaccount == null;
+    ensures result.fee == ?started.fee;
+    ensures switch (result.memo) { case (?_) { true }; case null { false } };
+    ensures result.from_subaccount == null;
+    ensures switch (result.created_at_time) { case (?_) { true }; case null { false } };
+    ensures result.amount == started.amount;
+  {
+    {
+      to = { owner = caller; subaccount = null };
+      fee = ?started.fee;
+      memo = ?operationMemo("withdraw", started.operationId);
+      from_subaccount = null;
+      created_at_time = ?natToLedgerCreatedAtTime(started.createdAtTime);
+      amount = started.amount
+    }
+  };
+
+  public query func governance_ledger() : async Principal
+    reads governanceLedger
+    ensures result == governanceLedger;
+  {
+    governanceLedger
+  };
+
+  public query func proposal_config() : async Config
+    reads dao
+    ensures result == Dao.config(dao);
+  {
+    Dao.config(dao)
+  };
+
+  public query func config_version() : async Nat
+    reads dao
+    ensures result == Dao.configVersion(dao);
+  {
+    Dao.configVersion(dao)
+  };
+
+  public query func dao_totals() : async DaoTotals
+    reads dao
+  {
+    Dao.totals(dao)
+  };
+
+  public query func next_proposal_id() : async Nat
+    reads dao
+  {
+    Dao.nextProposalId(dao)
+  };
+
+  public query func max_proposals() : async Nat
+  {
+    Dao.maxProposals()
+  };
+
+  public query func proposal_window() : async ProposalWindow
+    reads dao
+  {
+    Dao.proposalWindow(dao)
+  };
+
+  public query func voting_power(user : Principal) : async Nat
+    reads dao
+  {
+    let now = Time.now();
+    Dao.eligibleVotingPower(dao, user, now)
+  };
+
+  public query func stake_info(user : Principal) : async StakeInfo
+    reads dao
+  {
+    Dao.stakeInfo(dao, user)
+  };
+
+  public query func pending_withdrawal(user : Principal) : async ?PendingWithdrawal
+    reads withdrawOps
+  {
+    WithdrawalOps.pending(withdrawOps, user)
+  };
+
+  public query func proposal(id : Nat) : async ?Proposal
+    reads dao
+  {
+    Dao.proposal(dao, id)
+  };
+
+  public query func vote_info(id : Nat, user : Principal) : async VoteInfo
+    reads dao
+  {
+    Dao.voteInfo(dao, id, user)
+  };
+
+  public shared({ caller }) func deposit(
+    amount : Nat
+  ) : async Result<DepositReceipt, DepositError>
+    reads governanceLedger
+    modifies dao
+  {
+    switch (Dao.beginDeposit(dao, amount)) {
+      case (#err err) { #err(err) };
+      case (#ok _) {
+        let createdAtTime = ledgerCreatedAtTime();
+        let operationId = ledgerCreatedAtTimeNat(createdAtTime);
+        let ledger = governanceLedger;
+        let remote = ICRCLedger.fromPrincipal(ledger);
+        let args = depositTransferFromArgs(caller, amount, operationId, createdAtTime);
+        try {
+          let result = await remote.icrc2_transfer_from(args);
+          switch (result) {
+            case (#Ok txIndex) {
+              Dao.finishDepositOk(dao, caller, ledger, amount, txIndex)
+            };
+            case (#Err err) {
+              Dao.finishDepositErr(dao, caller, err)
+            }
+          }
+        } catch (_) {
+          Dao.finishDepositReject(dao, caller, ledgerReject())
+        }
+      }
+    }
+  };
+
+  public shared({ caller }) func withdraw(
+    amount : Nat
+  ) : async Result<WithdrawReceipt, WithdrawError>
+    reads governanceLedger
+    modifies dao, withdrawOps
+    ensures WithdrawalOps.valid(withdrawOps);
+  {
+    let ledger = governanceLedger;
+    let remote = ICRCLedger.fromPrincipal(ledger);
+    try {
+      let fee = await remote.icrc1_fee();
+      let ledgerTime = ledgerCreatedAtTime();
+      let createdAtTime = ledgerCreatedAtTimeNat(ledgerTime);
+      switch (WithdrawalOps.begin(withdrawOps, caller, ledger, amount, fee, createdAtTime)) {
+        case (#err err) { #err(err) };
+        case (#ok opStarted) {
+          switch (Dao.beginWithdraw(dao, caller, ledger, amount, fee, createdAtTime)) {
+            case (#err err) {
+              switch (WithdrawalOps.clear(withdrawOps, caller, opStarted)) {
+                case (_) {}
+              };
+              #err(err)
+            };
+            case (#ok started) {
+              assert started.debitAmount == started.amount + started.fee;
+              let args = withdrawTransferArgs(caller, started);
+              try {
+                let result = await remote.icrc1_transfer(args);
+                switch (result) {
+                  case (#Ok txIndex) {
+                    switch (Dao.finishWithdrawOk(dao, caller, started, txIndex)) {
+                      case (#ok receipt) {
+                        switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                          case (_) {}
+                        };
+                        #ok(receipt)
+                      };
+                      case (#err err) { #err(err) }
+                    }
+                  };
+                  case (#Err err) {
+                    switch (Dao.finishWithdrawErr(dao, caller, started, err)) {
+                      case (#ok receipt) {
+                        switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                          case (_) {}
+                        };
+                        #ok(receipt)
+                      };
+                      case (#err withdrawErr) {
+                        switch (withdrawErr) {
+                          case (#ledgerTransferErr(_)) {
+                            switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                              case (_) {}
+                            }
+                          };
+                          case (_) {}
+                        };
+                        #err(withdrawErr)
+                      }
+                    }
+                  }
+                }
+              } catch (_) {
+                Dao.finishWithdrawReject(dao, caller, started, ledgerReject())
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      #err(#ledgerFeeRejected(ledgerReject()))
+    }
+  };
+
+  public shared({ caller }) func retry_withdrawal() : async Result<WithdrawReceipt, WithdrawError>
+    reads governanceLedger
+    modifies dao, withdrawOps
+    ensures WithdrawalOps.valid(withdrawOps);
+  {
+    let ledger = governanceLedger;
+    let remote = ICRCLedger.fromPrincipal(ledger);
+    switch (WithdrawalOps.retryStart(withdrawOps, caller, ledger)) {
+      case (#err err) { #err(err) };
+      case (#ok started) {
+        if (started.createdAtTime > NAT64_MAX) {
+          return #err(#noPendingWithdrawal)
+        };
+        assert started.debitAmount == started.amount + started.fee;
+        let args = withdrawTransferArgs(caller, started);
+        try {
+          let result = await remote.icrc1_transfer(args);
+          switch (result) {
+            case (#Ok txIndex) {
+              switch (Dao.finishWithdrawOk(dao, caller, started, txIndex)) {
+                case (#ok receipt) {
+                  switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                    case (_) {}
+                  };
+                  #ok(receipt)
+                };
+                case (#err err) { #err(err) }
+              }
+            };
+            case (#Err err) {
+              switch (Dao.finishWithdrawErr(dao, caller, started, err)) {
+                case (#ok receipt) {
+                  switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                    case (_) {}
+                  };
+                  #ok(receipt)
+                };
+                case (#err withdrawErr) {
+                  switch (withdrawErr) {
+                    case (#ledgerTransferErr(_)) {
+                      switch (WithdrawalOps.clear(withdrawOps, caller, started)) {
+                        case (_) {}
+                      }
+                    };
+                    case (_) {}
+                  };
+                  #err(withdrawErr)
+                }
+              }
+            }
+          }
+        } catch (_) {
+          Dao.finishWithdrawReject(dao, caller, started, ledgerReject())
+        }
+      }
+    }
+  };
+
+  public shared({ caller }) func stake(amount : Nat) : async Result<StakeReceipt, StakeError>
+    reads governanceLedger
+    modifies dao
+    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  {
+    let now = Time.now();
+    Dao.stake(dao, caller, amount, now)
+  };
+
+  public shared({ caller }) func request_unstake(
+    amount : Nat
+  ) : async Result<RequestUnstakeReceipt, UnstakeError>
+    reads governanceLedger
+    modifies dao
+    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  {
+    let now = Time.now();
+    Dao.requestUnstake(dao, caller, amount, now)
+  };
+
+  public shared({ caller }) func claim_unstaked() : async Result<ClaimUnstakeReceipt, UnstakeError>
+    reads governanceLedger
+    modifies dao
+    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  {
+    let now = Time.now();
+    Dao.claimUnstaked(dao, caller, now)
+  };
+
+  public shared({ caller }) func create_proposal(
+    action : ConfigAction
+  ) : async Result<ProposalReceipt, ProposalError>
+    reads governanceLedger
+    modifies dao
+    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  {
+    let now = Time.now();
+    Dao.createProposal(dao, caller, action, now)
+  };
+
+  public shared({ caller }) func vote(
+    id : Nat,
+    choice : VoteChoice
+  ) : async Result<VoteReceipt, VoteError>
+    reads governanceLedger
+    modifies dao
+  {
+    let now = Time.now();
+    Dao.vote(dao, caller, id, choice, now)
+  };
+
+  public func close(id : Nat) : async Result<CloseReceipt, CloseError>
+    reads governanceLedger
+    modifies dao
+  {
+    let now = Time.now();
+    Dao.close(dao, id, now)
+  };
+
+  public func execute(id : Nat) : async Result<ExecuteReceipt, ExecuteError>
+    reads governanceLedger
+    modifies dao
+    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  {
+    Dao.execute(dao, id)
+  };
+}

@@ -15,5 +15,5 @@ That structure keeps inter-canister async behavior out of the core protocol
 logic where possible. Protocol modules can prove local accounting guarantees
 without threading every business operation through an external ledger await.
 
-The current project is `dex`. Later projects can include DAO, vault, and other
-standard-ICRC protocols using the same boundary pattern.
+The current projects are `dex` and `dao`. Later projects can include vault and
+other standard-ICRC protocols using the same boundary pattern.
