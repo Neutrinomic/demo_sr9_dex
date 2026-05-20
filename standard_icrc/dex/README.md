@@ -1,14 +1,14 @@
-# Standard ICRC DEX Demo
+# Standard ICRC DEX Blueprint
 
-This is a demo reference project. It is not production ready, not audited for
-mainnet custody, and not a complete production reference implementation of a
-decentralized exchange.
+This is a protocol foundation blueprint. It is not production ready, not
+audited for mainnet custody, and not a complete production reference
+implementation of a decentralized exchange.
 
 The purpose of this repository is to show how SR9 verification can be used to
 build a serious protocol-shaped application with executable code, contracts,
 module boundaries, async ledger calls, and machine-checked proof obligations.
-It is a working research/demo artifact for verified DEX design, not something
-to deploy with real user funds.
+It is a working research blueprint for verified DEX design, not something to
+deploy with real user funds.
 
 ## Current Snapshot
 
@@ -27,7 +27,7 @@ As of the latest full DEX gate on 2026-05-18:
 
 ## What This Demonstrates
 
-This demo models a local-balance DEX that interacts with external ICRC-style
+This blueprint models a local-balance DEX that interacts with external ICRC-style
 ledgers. Users deposit tokens into local balances, swap deposited balances
 through constant-product pools, add or remove liquidity, and withdraw back to
 external ledgers.
@@ -138,7 +138,7 @@ The current verified surface includes these guarantees:
 
 ## Guardrails
 
-The demo intentionally keeps several controls visible:
+The blueprint intentionally keeps several controls visible:
 
 - The DEX actor is a persistent actor class and takes the controller principal
   during initialization.
@@ -158,7 +158,7 @@ The demo intentionally keeps several controls visible:
 
 ## Remaining Non-Production Risks
 
-The following are known reasons this is still a demo:
+The following are known reasons this is still not production-ready:
 
 - The DEX trusts whitelisted external ledgers to behave like standard truthful
   ICRC ledgers.
@@ -166,7 +166,7 @@ The following are known reasons this is still a demo:
   tracked, but the full state-level old-obligation proof for that new cleanup
   transition remains future verifier work.
 - Locked-liquidity shutdown policy is still a protocol-design choice.
-- Outbound duplicate-transfer semantics are a whitelist contract in this demo:
+- Outbound duplicate-transfer semantics are a whitelist contract in this blueprint:
   allowed ledgers must not report ambiguous `#Duplicate` results for these
   non-idempotent outbound calls.
 - Upgrade and external-ledger reconciliation procedures are not productionized.

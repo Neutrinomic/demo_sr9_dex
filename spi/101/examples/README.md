@@ -12,7 +12,7 @@ A realistic shape example for SPI-101:
 - it supports direct subjects and SPI-100 delegated subjects;
 - `spi_101_balance` returns the nonzero ledger balances for one subject.
 
-The demo simulates successful ledger calls so the local state pattern is easy to
+The example simulates successful ledger calls so the local state pattern is easy to
 verify. A production actor would replace the local success simulation with real
 ICRC `transfer_from` and `transfer` calls.
 

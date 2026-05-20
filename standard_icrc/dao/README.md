@@ -1,6 +1,6 @@
-# Sector9 DAO Demo
+# Sector9 DAO Blueprint
 
-This is a standalone DAO demo written in Sector9.
+This is a standalone DAO protocol foundation blueprint written in Sector9.
 
 ## Executive Summary
 
@@ -9,7 +9,7 @@ tracks each subject's deposited balance locally. A subject can be a direct
 principal or an SPI-100 virtual principal controlled by the caller. Users
 deposit through the SPI-101 ICRC-2 flow, stake deposited tokens, wait 7 days for
 voting power to mature, and then create or vote on governance proposals. Up to
-32 proposals can be created in this bounded demo, and they can be open or
+32 proposals can be created in this bounded blueprint, and they can be open or
 passed at the same time.
 Creating a proposal reserves a bond equal to the current proposal threshold from
 the proposer's active stake; failed proposals slash that bond from local DAO
@@ -34,7 +34,7 @@ accounting module, and the withdrawal-operation module verify independently. The
 remaining production assumptions are operational: the configured governance
 ledger is trusted, users deposit through the DAO flow, direct token transfers
 are unsupported, and deployment/upgrade/reconciliation procedures are outside
-this demo.
+this blueprint.
 
 ## How It Works
 
@@ -345,7 +345,7 @@ gate is:
 bun run test:dao:slow
 ```
 
-By default it populates 1000 users, creates up to the demo's 32 lifetime
+By default it populates 1000 users, creates up to the blueprint's 32 lifetime
 proposals in waves, then runs 3000 mixed deposit/stake/unstake/claim/withdraw
 and query actions before checking DAO totals, config version, sampled account
 state, and the real ICRC balance held by the DAO canister. For quick local

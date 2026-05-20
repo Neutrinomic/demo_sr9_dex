@@ -33,10 +33,10 @@ The current tree is organized around protocol families:
   projects in this repository.
 
 Current projects include `standard_icrc/dex`, a verified constant-product DEX
-demo with local balances, ICRC deposits and withdrawals, LP-share virtual
+blueprint with local balances, ICRC deposits and withdrawals, LP-share virtual
 ledgers, controller-managed ledger/pool lifecycle, runtime tests, and benchmark
-reports, and `standard_icrc/dao`, a governance-token DAO demo using the same
-standard-ledger boundary style.
+reports, and `standard_icrc/dao`, a governance-token DAO blueprint using the
+same standard-ledger boundary style.
 
 ## Runtime Testing
 
