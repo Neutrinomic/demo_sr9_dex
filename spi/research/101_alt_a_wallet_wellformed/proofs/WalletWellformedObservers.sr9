@@ -1,0 +1,26 @@
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/101_alt_a_wallet_wellformed/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public pure func fungibleEntryIsWellFormed(ledger : Principal) : Bool
+    requires true;
+    ensures result;
+  {
+    let entry = SPI101.externalLedgerWalletEntry(ledger, 1, ?"Token");
+    Kernel.walletEntryWellFormed(entry)
+  };
+
+  public pure func localEntryIsWellFormed(ledger : Principal) : Bool
+    requires true;
+    ensures result;
+  {
+    let entry = SPI101.fungibleWalletEntry(
+      #local(Blob.appendNat32BEByte(Principal.toBlob(ledger), 1, 0)),
+      1,
+      ?"LP"
+    );
+    Kernel.walletEntryWellFormed(entry)
+  };
+}

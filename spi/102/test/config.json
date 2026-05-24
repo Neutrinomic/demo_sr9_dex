@@ -1,0 +1,55 @@
+{
+  "workspaceRoot": "../../..",
+  "actorFixturesDir": "fixtures/actors",
+  "defaultActor": "dexPrincipalLp",
+  "test": {
+    "specGlob": "spec/**/*.test.ts",
+    "timeoutMs": 240000,
+    "reportsDir": "reports",
+    "exceptionsFile": "exceptions.ts"
+  },
+  "actors": {
+    "dexPrincipalLp": {
+      "name": "DexPrincipalLpActor",
+      "source": "../examples/DexPrincipalLpActor.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        {
+          "name": "core",
+          "path": "core/src",
+          "env": "CORE_PACKAGE_PATH",
+          "findUp": true,
+          "bundledFallback": true
+        },
+        {
+          "name": "spi",
+          "path": "spi",
+          "env": "SPI_PACKAGE_PATH",
+          "findUp": true
+        }
+      ]
+    },
+    "daoPending": {
+      "name": "DaoPendingActor",
+      "source": "../examples/DaoPendingActor.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        {
+          "name": "core",
+          "path": "core/src",
+          "env": "CORE_PACKAGE_PATH",
+          "findUp": true,
+          "bundledFallback": true
+        },
+        {
+          "name": "spi",
+          "path": "spi",
+          "env": "SPI_PACKAGE_PATH",
+          "findUp": true
+        }
+      ]
+    }
+  }
+}

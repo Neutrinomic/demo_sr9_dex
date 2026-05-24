@@ -1,0 +1,22 @@
+import Kernel "mo:spi/research/102_alt_b_guard_reason_laws/Kernel";
+import Base "mo:spi/102/Types";
+
+module {
+  public lemma acceptedReceiptHasNoReason(
+    isAuthorized : Bool,
+    q : Base.Quote,
+    guard : Base.Guard,
+    receipt : Base.Receipt
+  ) : ()
+    requires Kernel.receiptAccepted(isAuthorized, q, guard, receipt);
+    ensures Kernel.guardRejectReason(guard, receipt, receipt.executedAt) == null;
+  {};
+
+  public pure func daoNoFeeConserves(a : Nat, b : Nat, c : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.daoConserves(a, b, c, a, b, c)
+  };
+}
+

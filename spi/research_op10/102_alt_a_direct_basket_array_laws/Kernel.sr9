@@ -1,0 +1,121 @@
+import Base "mo:spi/102/Kernel";
+import Types "mo:spi/102/Types";
+
+module {
+  public pure func quoteAuthorizedForCaller(caller : Principal, q : Types.Quote) : Bool
+    requires true;
+    ensures result == Base.accountBelongsToWallet(q.account, caller);
+  {
+    Base.accountBelongsToWallet(q.account, caller)
+  };
+
+  public pure func requestAuthorizedForCaller(
+    caller : Principal,
+    request : Types.QuoteRequest
+  ) : Bool
+    requires true;
+    ensures result == Base.accountBelongsToWallet(request.account, caller);
+  {
+    Base.accountBelongsToWallet(request.account, caller)
+  };
+
+  public pure func executableForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : Bool
+    requires true;
+    ensures result == Base.executable(quoteAuthorizedForCaller(caller, q), q, guard, receipt, now, status);
+  {
+    Base.executable(quoteAuthorizedForCaller(caller, q), q, guard, receipt, now, status)
+  };
+
+  public func quoteResultForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    request : Types.QuoteRequest,
+    now : Int
+  ) : Types.Result<Types.Quote, Types.ExecuteError>
+    requires true;
+    ensures switch (result) {
+      case (#ok quote) {
+        quote == q and
+          Base.quoteReturned(requestAuthorizedForCaller(caller, request), request, quote) and
+          Base.quoteLive(quote, now)
+      };
+      case (#err(_)) {
+        not requestAuthorizedForCaller(caller, request) or
+          not Base.quoteAccepted(q, request, now)
+      }
+    };
+  {
+    if (not Base.accountBelongsToWallet(request.account, caller)) {
+      #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    } else if (request.intent.amount == 0 or not Base.quoteHasPositiveFlow(q)) {
+      #err(#invalidAmount)
+    } else if (not Base.quoteBindsRequest(q, request)) {
+      #err(#quoteReceiptMismatch)
+    } else if (not Base.quoteLive(q, now)) {
+      #err(#expiredQuote)
+    } else {
+      #ok(q)
+    }
+  };
+
+  public func checkExecuteForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ?Types.ExecuteError
+    requires true;
+    ensures switch (result) {
+      case null {
+        executableForCaller(caller, q, guard, receipt, now, status)
+      };
+      case (?_) {
+        not executableForCaller(caller, q, guard, receipt, now, status)
+      }
+    };
+  {
+    if (not Base.accountBelongsToWallet(q.account, caller)) {
+      return ?#accountNotAuthorized({
+        caller = caller;
+        account = q.account
+      })
+    };
+    if (not Base.quoteHasPositiveFlow(q)) {
+      return ?#invalidAmount
+    };
+    if (not Base.quoteLive(q, now)) {
+      return ?#expiredQuote
+    };
+    if (not Base.edgeStatusLive(status)) {
+      return ?#edgeNotLive(status)
+    };
+    if (not Base.receiptBindsQuote(q, receipt) or receipt.executedAt != now) {
+      return ?#quoteReceiptMismatch
+    };
+    if (not Base.guardAccepts(guard, receipt, now)) {
+      return ?#guardRejected
+    };
+    null
+  };
+
+  public lemma checkExecuteForCallerImpliesReceiptAccepted(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ()
+    requires executableForCaller(caller, q, guard, receipt, now, status);
+    ensures Base.receiptAccepted(quoteAuthorizedForCaller(caller, q), q, guard, receipt);
+  {};
+}

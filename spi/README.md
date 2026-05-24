@@ -32,11 +32,18 @@ and governance surfaces.
 
 ## Interfaces
 
-- `100/` drafts reserved virtual-principal encoding rules for protocol
-  assets that need principal keys but must not collide with real IC users,
-  canisters, or ledgers.
-- `101/` drafts the shared deposit, withdraw, and balance surface for
-  canisters that hold local balances backed by ICRC ledgers.
+- `100/` defines compact local account ids: account blobs that decode to
+  `{ wallet : Principal; id : Nat }`, plus a checksummed Base58 text form.
+- `101/` defines the shared wallet surface for canisters that hold
+  account-local assets and protocol positions.
+- `102/` drafts the discover, quote, execute model: protocols expose a graph
+  of typed transitions, clients quote one edge, and execution applies it under
+  caller acceptance limits.
+- `103/` defines bridge profiles for moving external assets into and out of
+  SPI-101 wallet holdings. The first profile is ICRC deposit/withdraw.
+
+`seed-research.md` evaluates the current SPI-100, SPI-101, SPI-102, and SPI-103 seeds
+against the examples and client harnesses grown from them.
 
 When used as an SR9 package, map the package name `spi` to this folder. For
 example:
@@ -48,5 +55,5 @@ sector9 --package core ./core/src --package spi ./spi --verify my_actor.sr9
 Then protocol modules can import SPI definitions by stable package path:
 
 ```motoko
-import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
+import AccountCodec "mo:spi/100/AccountCodec";
 ```

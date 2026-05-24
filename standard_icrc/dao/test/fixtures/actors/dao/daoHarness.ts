@@ -1,5 +1,9 @@
 import { deployActorFixture } from "../../../../../../shared/harness/actorFixture.ts";
-import { IDL, type PocketIc, type Principal } from "../../../../../../shared/common/runtime.ts";
+import {
+  IDL,
+  type PocketIc,
+  type Principal,
+} from "../../../../../../shared/common/runtime.ts";
 
 export type DaoFixture = {
   canisterId: Principal;

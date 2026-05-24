@@ -1,0 +1,220 @@
+type WalletRequest = 
+ record {
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
+ };
+type WalletReceipt = 
+ record {
+   account: Account;
+   entries: vec WalletEntry;
+   nextCursor: opt nat;
+   witness: opt text;
+ };
+type WalletHolding = 
+ variant {
+   fungible: record {
+               amount: nat;
+               meta: NoMetadata;
+             };
+   nonfungible: record {
+                  id: nat;
+                  meta: NoMetadata;
+                };
+ };
+type WalletError = variant {
+                     accountNotAuthorized:
+                      record {
+                        account: Account;
+                        caller: principal;
+                      };};
+type WalletEntry = 
+ record {
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   holding: WalletHolding;
+   node: NodeId;
+   status: HoldingStatus;
+ };
+type Result_2 = 
+ variant {
+   err: WalletError;
+   ok: WalletReceipt;
+ };
+type Result_1 = 
+ variant {
+   err: ExecuteError;
+   ok: Receipt;
+ };
+type Result = 
+ variant {
+   err: ExecuteError;
+   ok: Quote;
+ };
+type Receipt = 
+ record {
+   account: Account;
+   edgeId: EdgeId;
+   executedAt: int;
+   fees: vec BasketEntry;
+   input: vec BasketEntry;
+   output: vec BasketEntry;
+   positionInputs: vec PositionEffect;
+   positionOutputs: vec PositionEffect;
+   positionRemaining: vec PositionEffect;
+   witness: opt text;
+ };
+type QuoteRequest = 
+ record {
+   account: Account;
+   edgeId: EdgeId;
+   intent: Intent;
+ };
+type Quote = 
+ record {
+   account: Account;
+   edgeId: EdgeId;
+   expiresAt: opt int;
+   fees: vec BasketEntry;
+   input: vec BasketEntry;
+   output: vec BasketEntry;
+   positionInputs: vec PositionEffect;
+   positionOutputs: vec PositionEffect;
+   preconditions: opt text;
+   witness: opt text;
+ };
+type PositionEffect = 
+ record {
+   amount: nat;
+   metadata: opt text;
+   node: NodeId;
+   positionId: opt nat;
+   unlockAt: opt int;
+ };
+type NodeShape = 
+ record {
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   form: NodeForm;
+   nodeId: NodeId;
+   risk: opt text;
+ };
+type NodeId = 
+ variant {
+   ledger: LedgerId;
+   local: blob;
+ };
+type NodeForm = 
+ variant {
+   fungible;
+   nonfungible;
+ };
+type NoMetadata = null;
+type LedgerId = principal;
+type Intent = 
+ record {
+   amount: nat;
+   extension: opt text;
+   positionId: opt nat;
+ };
+type HoldingStatus = 
+ variant {
+   available;
+   locked: record {unlockAt: opt int;};
+   pending: record {unlockAt: opt int;};
+ };
+type Guard = 
+ record {
+   deadline: opt int;
+   extension: opt text;
+   maxDebt: opt nat;
+   maxFee: vec BasketEntry;
+   maxPriceImpact: opt nat;
+   maxSpend: vec BasketEntry;
+   minHealth: opt nat;
+   minReceive: vec BasketEntry;
+   minShares: opt nat;
+ };
+type ExecuteRequest = 
+ record {
+   guard: Guard;
+   quote: Quote;
+ };
+type ExecuteError = 
+ variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
+   edgeNotLive: DiscoveryStatus;
+   expiredQuote;
+   guardRejected;
+   insufficientInput;
+   invalidAmount;
+   protocolSpecific: text;
+   quoteReceiptMismatch;
+   unknownEdge;
+ };
+type EdgeShape = 
+ record {
+   displayLabel: opt text;
+   edgeId: EdgeId;
+   inputNodes: vec NodeId;
+   outputNodes: vec NodeId;
+   risk: opt text;
+ };
+type EdgeId = 
+ record {
+   id: nat;
+   namespace: text;
+   scope: CanisterId;
+ };
+type DiscoveryStatus = 
+ variant {
+   insufficientInput;
+   live;
+   notMature: record {unlockAt: int;};
+   paused;
+   protocolSpecific: text;
+   unauthorized;
+ };
+type DiscoveryEdge = 
+ record {
+   edge: EdgeShape;
+   status: DiscoveryStatus;
+ };
+type Discovery = 
+ record {
+   account: Account;
+   edges: vec DiscoveryEdge;
+   nextCursor: opt nat;
+   nodes: vec NodeShape;
+   witness: opt text;
+ };
+type DiscoverRequest = 
+ record {
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
+ };
+type CanonicalBasketDaoActor = 
+ service {
+   advance_time: (delta: int) -> ();
+   raw_balances: () -> (nat, nat, nat) query;
+   setup_credit: (account: Account, amount: nat) -> ();
+   spi_100_account: (wallet: principal, id: nat) -> (opt Account) query;
+   spi_101_wallet: (request: WalletRequest) -> (Result_2) query;
+   spi_102_discover: (request: DiscoverRequest) -> (Discovery) query;
+   spi_102_execute: (request: ExecuteRequest) -> (Result_1);
+   spi_102_quote: (request: QuoteRequest) -> (Result) query;
+ };
+type CanisterId = principal;
+type BasketEntry = 
+ record {
+   amount: nat;
+   node: NodeId;
+ };
+type Account = blob;
+service : (stakingLedger: principal) -> CanonicalBasketDaoActor

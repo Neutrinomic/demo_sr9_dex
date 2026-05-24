@@ -1,0 +1,678 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import BMap "mo:core/pure/BMap";
+import Kernel "mo:spi/102/Kernel";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
+import SPI101 "mo:spi/101/Wallet";
+import SPI103 "mo:spi/103/ICRCBridge";
+import Time "mo:core/Time";
+import Types "mo:spi/102/Types";
+
+persistent actor class DexPrincipalLpActor(
+  tokenA : Principal,
+  tokenB : Principal,
+  _lpShare : Principal,
+  swapFeeBps : Nat
+) {
+  public type Result<Ok, Err> = Types.Result<Ok, Err>;
+  public type DiscoverRequest = Types.DiscoverRequest;
+  public type QuoteRequest = Types.QuoteRequest;
+  public type ExecuteRequest = Types.ExecuteRequest;
+  public type WalletRequest = SPI101.WalletRequest;
+  public type WalletReceipt = SPI101.WalletReceipt;
+  public type WalletError = SPI101.WalletError;
+  public type WalletEntry = SPI101.WalletEntry;
+  public type IcrcDepositRequest = SPI103.IcrcDepositRequest;
+  public type IcrcDepositReceipt = SPI103.IcrcDepositReceipt;
+  public type IcrcDepositError = SPI103.IcrcDepositError;
+  public type IcrcWithdrawRequest = SPI103.IcrcWithdrawRequest;
+  public type IcrcWithdrawReceipt = SPI103.IcrcWithdrawReceipt;
+  public type IcrcWithdrawError = SPI103.IcrcWithdrawError;
+
+  var balancesA : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+  var balancesB : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+  var lpShares : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+
+  var reserveA : Nat = 0;
+  var reserveB : Nat = 0;
+  var totalLp : Nat = 0;
+
+  private pure func orderedBooks(
+    a : BMap.BMap<AccountCodec.Account, Nat>,
+    b : BMap.BMap<AccountCodec.Account, Nat>,
+    lp : BMap.BMap<AccountCodec.Account, Nat>
+  ) : Bool
+    requires true;
+  {
+    BMap.orderedBy<AccountCodec.Account, Nat>(a, Blob.compare) and
+      BMap.orderedBy<AccountCodec.Account, Nat>(b, Blob.compare) and
+      BMap.orderedBy<AccountCodec.Account, Nat>(lp, Blob.compare)
+  };
+
+  invariant orderedBooks(balancesA, balancesB, lpShares);
+
+  private pure func callerOwnsAccount(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  private pure func mapBalance(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account
+  ) : Nat
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures result == Map.getOr<AccountCodec.Account, Nat>(
+      BMap.Spec.model<AccountCodec.Account, Nat>(balances),
+      account,
+      0
+    );
+  {
+    switch (BMap.get<AccountCodec.Account, Nat>(balances, Blob.compare, account)) {
+      case null { 0 };
+      case (?amount) { amount }
+    }
+  };
+
+  private pure trusted func mapSet(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account,
+    amount : Nat
+  ) : BMap.BMap<AccountCodec.Account, Nat>
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures BMap.orderedBy<AccountCodec.Account, Nat>(result, Blob.compare);
+  {
+    BMap.add<AccountCodec.Account, Nat>(balances, Blob.compare, account, amount)
+  };
+
+  private pure trusted func mapCredit(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account,
+    amount : Nat
+  ) : BMap.BMap<AccountCodec.Account, Nat>
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures BMap.orderedBy<AccountCodec.Account, Nat>(result, Blob.compare);
+  {
+    mapSet(balances, account, mapBalance(balances, account) + amount)
+  };
+
+  private pure func edge(namespace : Text, id : Nat) : Types.EdgeId
+    requires true;
+  {
+    {
+      scope = Runtime.selfId();
+      namespace = namespace;
+      id = id
+    }
+  };
+
+  private pure func swapAToBEdge() : Types.EdgeId { edge("swap-a-b", 0) };
+  private pure func swapBToAEdge() : Types.EdgeId { edge("swap-b-a", 1) };
+  private pure func addLiquidityEdge() : Types.EdgeId { edge("add-liquidity", 2) };
+  private pure func removeLiquidityEdge() : Types.EdgeId { edge("remove-liquidity", 3) };
+
+  private pure func ledgerNode(ledger : Principal) : Types.NodeId
+    requires true;
+  {
+    #ledger(ledger)
+  };
+
+  private pure trusted func lpNode() : Types.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([1]))
+  };
+
+  private func nodeShape(nodeId : Types.NodeId, form : Types.NodeForm, name : Text) : Types.NodeShape
+    requires true;
+  {
+    {
+      nodeId = nodeId;
+      form = form;
+      displayAsset = null;
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  private pure func walletEntry(asset : Types.NodeId, amount : Nat, name : Text) : WalletEntry
+    requires true;
+  {
+    SPI101.fungibleWalletEntry(asset, amount, ?name)
+  };
+
+  private func edgeShape(
+    edgeId : Types.EdgeId,
+    inputs : [Types.NodeId],
+    outputs : [Types.NodeId],
+    name : Text
+  ) : Types.EdgeShape
+    requires true;
+  {
+    {
+      edgeId = edgeId;
+      inputNodes = inputs;
+      outputNodes = outputs;
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  private func effectiveFeeBps() : Nat
+    reads swapFeeBps
+    requires true;
+    ensures result <= 10_000;
+  {
+    if (swapFeeBps > 10_000) { 10_000 } else { swapFeeBps }
+  };
+
+  private func feeFor(amount : Nat) : Nat
+    reads swapFeeBps
+    requires true;
+    ensures result <= amount;
+  {
+    (amount * effectiveFeeBps()) / 10_000
+  };
+
+  private func netInput(amount : Nat) : Nat
+    reads swapFeeBps
+    requires true;
+    ensures result <= amount;
+  {
+    amount - feeFor(amount)
+  };
+
+  private func supportedLedger(ledger : Principal) : Bool
+    reads tokenA, tokenB
+    requires true;
+  {
+    ledger == tokenA or ledger == tokenB
+  };
+
+  private func swapOut(amount : Nat, reserveIn : Nat, reserveOut : Nat) : Nat
+    reads swapFeeBps
+    requires true;
+  {
+    let net = netInput(amount);
+    if (net == 0 or reserveIn == 0 or reserveOut == 0) {
+      0
+    } else {
+      (net * reserveOut) / (reserveIn + net)
+    }
+  };
+
+  private trusted func removeOut(amount : Nat, reserve : Nat) : Nat
+    reads totalLp
+    requires true;
+    ensures true;
+  {
+    if (totalLp == 0 or amount == 0 or reserve == 0) {
+      0
+    } else {
+      (amount * reserve) / totalLp
+    }
+  };
+
+  private func statusFor(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat) : Types.DiscoveryStatus
+    reads balancesA, balancesB, lpShares, reserveA, reserveB, totalLp
+    requires orderedBooks(balancesA, balancesB, lpShares);
+  {
+    if (Kernel.sameEdgeId(edgeId, swapAToBEdge())) {
+      let balance = mapBalance(balancesA, account);
+      if (balance > 0 and reserveB > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel.sameEdgeId(edgeId, swapBToAEdge())) {
+      let balance = mapBalance(balancesB, account);
+      if (balance > 0 and reserveA > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel.sameEdgeId(edgeId, addLiquidityEdge())) {
+      let balanceA = mapBalance(balancesA, account);
+      let balanceB = mapBalance(balancesB, account);
+      if (balanceA > 0 and balanceB > 0 and (amount == 0 or (balanceA >= amount and balanceB >= amount))) {
+        #live
+      } else {
+        #insufficientInput
+      }
+    } else if (Kernel.sameEdgeId(edgeId, removeLiquidityEdge())) {
+      let shares = mapBalance(lpShares, account);
+      if (shares > 0 and totalLp > 0 and (amount == 0 or shares >= amount)) { #live } else { #insufficientInput }
+    } else {
+      #protocolSpecific("unknown-edge")
+    }
+  };
+
+  private func discoveryStatus(
+    caller : Principal,
+    account : AccountCodec.Account,
+    edgeId : Types.EdgeId
+  ) : Types.DiscoveryStatus
+    reads balancesA, balancesB, lpShares, reserveA, reserveB, totalLp
+    requires orderedBooks(balancesA, balancesB, lpShares);
+  {
+    if (not callerOwnsAccount(caller, account)) {
+      #unauthorized
+    } else {
+      statusFor(account, edgeId, 0)
+    }
+  };
+
+  private pure trusted func discoveryEdge(
+    shape : Types.EdgeShape,
+    status : Types.DiscoveryStatus
+  ) : Types.DiscoveryEdge
+    requires true;
+    ensures true;
+  {
+    { edge = shape; status = status }
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared query({ caller }) trusted func spi_102_discover(
+    request : DiscoverRequest
+  ) : async Types.Discovery
+    reads tokenA, tokenB, balancesA, balancesB, lpShares, reserveA, reserveB, totalLp
+    requires true;
+    ensures true;
+  {
+    {
+      account = request.account;
+      nodes = [
+        nodeShape(ledgerNode(tokenA), #fungible, "Token A balance"),
+        nodeShape(ledgerNode(tokenB), #fungible, "Token B balance"),
+        nodeShape(lpNode(), #fungible, "LP share balance")
+      ];
+      edges = [
+        discoveryEdge(
+          edgeShape(swapAToBEdge(), [ledgerNode(tokenA)], [ledgerNode(tokenB)], "Swap A to B"),
+          discoveryStatus(caller, request.account, swapAToBEdge())
+        ),
+        discoveryEdge(
+          edgeShape(swapBToAEdge(), [ledgerNode(tokenB)], [ledgerNode(tokenA)], "Swap B to A"),
+          discoveryStatus(caller, request.account, swapBToAEdge())
+        ),
+        discoveryEdge(
+          edgeShape(addLiquidityEdge(), [ledgerNode(tokenA), ledgerNode(tokenB)], [lpNode()], "Add liquidity"),
+          discoveryStatus(caller, request.account, addLiquidityEdge())
+        ),
+        discoveryEdge(
+          edgeShape(removeLiquidityEdge(), [lpNode()], [ledgerNode(tokenA), ledgerNode(tokenB)], "Remove liquidity"),
+          discoveryStatus(caller, request.account, removeLiquidityEdge())
+        )
+      ];
+      nextCursor = null;
+      witness = null
+    }
+  };
+
+  private pure func knownEdge(edgeId : Types.EdgeId) : Bool
+    requires true;
+  {
+    Kernel.sameEdgeId(edgeId, swapAToBEdge()) or
+      Kernel.sameEdgeId(edgeId, swapBToAEdge()) or
+      Kernel.sameEdgeId(edgeId, addLiquidityEdge()) or
+      Kernel.sameEdgeId(edgeId, removeLiquidityEdge())
+  };
+
+  private func quoteFor(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat, now : Int) : Types.Quote
+    reads tokenA, tokenB, reserveA, reserveB, totalLp, swapFeeBps
+    requires true;
+  {
+    if (Kernel.sameEdgeId(edgeId, swapAToBEdge())) {
+      quoteBaskets(
+        account,
+        edgeId,
+        [{ node = ledgerNode(tokenA); amount = amount }],
+        [{ node = ledgerNode(tokenB); amount = swapOut(amount, reserveA, reserveB) }],
+        [{ node = ledgerNode(tokenA); amount = feeFor(amount) }],
+        now
+      )
+    } else if (Kernel.sameEdgeId(edgeId, swapBToAEdge())) {
+      quoteBaskets(
+        account,
+        edgeId,
+        [{ node = ledgerNode(tokenB); amount = amount }],
+        [{ node = ledgerNode(tokenA); amount = swapOut(amount, reserveB, reserveA) }],
+        [{ node = ledgerNode(tokenB); amount = feeFor(amount) }],
+        now
+      )
+    } else if (Kernel.sameEdgeId(edgeId, addLiquidityEdge())) {
+      quoteBaskets(
+        account,
+        edgeId,
+        [{ node = ledgerNode(tokenA); amount = amount }, { node = ledgerNode(tokenB); amount = amount }],
+        [{ node = lpNode(); amount = amount }],
+        [],
+        now
+      )
+    } else {
+      quoteBaskets(
+        account,
+        edgeId,
+        [{ node = lpNode(); amount = amount }],
+        [{ node = ledgerNode(tokenA); amount = removeOut(amount, reserveA) }, { node = ledgerNode(tokenB); amount = removeOut(amount, reserveB) }],
+        [],
+        now
+      )
+    }
+  };
+
+  private func quoteBaskets(
+    account : AccountCodec.Account,
+    edgeId : Types.EdgeId,
+    input : [Types.BasketEntry],
+    output : [Types.BasketEntry],
+    fees : [Types.BasketEntry],
+    now : Int
+  ) : Types.Quote
+    requires true;
+  {
+    {
+      account = account;
+      edgeId = edgeId;
+      input = input;
+      output = output;
+      positionInputs = [];
+      positionOutputs = [];
+      fees = fees;
+      expiresAt = ?(now + 300_000_000_000);
+      preconditions = null;
+      witness = null
+    }
+  };
+
+  public shared query({ caller }) func spi_102_quote(
+    request : QuoteRequest
+  ) : async Result<Types.Quote, Types.ExecuteError>
+    reads tokenA, tokenB, reserveA, reserveB, totalLp, swapFeeBps
+    ensures switch (result) {
+      case (#ok quote) {
+        Kernel.quoteReturned(Kernel.requestAuthorizedForCaller(caller, request), request, quote) and knownEdge(request.edgeId)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (not knownEdge(request.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let now = Time.now();
+    Kernel.quoteResultForCaller(
+      caller,
+      quoteFor(request.account, request.edgeId, request.intent.amount, now),
+      request,
+      now
+    )
+  };
+
+  private pure trusted func quoteAmount(q : Types.Quote) : Nat
+    requires true;
+    ensures true;
+  {
+    if (q.input.size() == 0) { 0 } else { q.input[0].amount }
+  };
+
+  private pure trusted func firstOutputAmount(receipt : Types.Receipt) : Nat
+    requires true;
+    ensures true;
+  {
+    if (receipt.output.size() == 0) { 0 } else { receipt.output[0].amount }
+  };
+
+  private pure trusted func secondOutputAmount(receipt : Types.Receipt) : Nat
+    requires true;
+    ensures true;
+  {
+    if (receipt.output.size() < 2) { 0 } else { receipt.output[1].amount }
+  };
+
+  private trusted func receiptFor(q : Types.Quote, amount : Nat, now : Int) : Types.Receipt
+    reads tokenA, tokenB, reserveA, reserveB, totalLp, swapFeeBps
+    requires true;
+    ensures true;
+  {
+    let refreshed = quoteFor(q.account, q.edgeId, amount, now);
+    {
+      account = q.account;
+      edgeId = q.edgeId;
+      input = refreshed.input;
+      output = refreshed.output;
+      positionInputs = [];
+      positionOutputs = [];
+      positionRemaining = [];
+      fees = refreshed.fees;
+      executedAt = now;
+      witness = q.witness
+    }
+  };
+
+  private func commit(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat, receipt : Types.Receipt) : ?Types.ExecuteError
+    reads tokenA, tokenB
+    modifies balancesA, balancesB, lpShares, reserveA, reserveB, totalLp
+    requires orderedBooks(balancesA, balancesB, lpShares);
+    ensures orderedBooks(balancesA, balancesB, lpShares);
+  {
+    if (Kernel.sameEdgeId(edgeId, swapAToBEdge())) {
+      let out = firstOutputAmount(receipt);
+      if (mapBalance(balancesA, account) < amount or reserveB < out) {
+        ?#insufficientInput
+      } else {
+        balancesA := mapSet(balancesA, account, mapBalance(balancesA, account) - amount);
+        balancesB := mapCredit(balancesB, account, out);
+        reserveA += amount;
+        reserveB -= out;
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, swapBToAEdge())) {
+      let out = firstOutputAmount(receipt);
+      if (mapBalance(balancesB, account) < amount or reserveA < out) {
+        ?#insufficientInput
+      } else {
+        balancesB := mapSet(balancesB, account, mapBalance(balancesB, account) - amount);
+        balancesA := mapCredit(balancesA, account, out);
+        reserveB += amount;
+        reserveA -= out;
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, addLiquidityEdge())) {
+      if (mapBalance(balancesA, account) < amount or mapBalance(balancesB, account) < amount) {
+        ?#insufficientInput
+      } else {
+        balancesA := mapSet(balancesA, account, mapBalance(balancesA, account) - amount);
+        balancesB := mapSet(balancesB, account, mapBalance(balancesB, account) - amount);
+        lpShares := mapCredit(lpShares, account, amount);
+        reserveA += amount;
+        reserveB += amount;
+        totalLp += amount;
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, removeLiquidityEdge())) {
+      let outA = firstOutputAmount(receipt);
+      let outB = secondOutputAmount(receipt);
+      if (mapBalance(lpShares, account) < amount or totalLp < amount or reserveA < outA or reserveB < outB) {
+        ?#insufficientInput
+      } else {
+        lpShares := mapSet(lpShares, account, mapBalance(lpShares, account) - amount);
+        balancesA := mapCredit(balancesA, account, outA);
+        balancesB := mapCredit(balancesB, account, outB);
+        reserveA -= outA;
+        reserveB -= outB;
+        totalLp -= amount;
+        null
+      }
+    } else {
+      ?#unknownEdge
+    }
+  };
+
+  public shared({ caller }) func spi_102_execute(
+    request : ExecuteRequest
+  ) : async Result<Types.Receipt, Types.ExecuteError>
+    reads tokenA, tokenB, reserveA, reserveB, totalLp, swapFeeBps
+    modifies balancesA, balancesB, lpShares, reserveA, reserveB, totalLp
+    ensures switch (result) {
+      case (#ok receipt) {
+        Kernel.receiptAccepted(Kernel.quoteAuthorizedForCaller(caller, request.quote), request.quote, request.guard, receipt) and
+          knownEdge(request.quote.edgeId)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (not knownEdge(request.quote.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let amount = quoteAmount(request.quote);
+    let now = Time.now();
+    let status = statusFor(request.quote.account, request.quote.edgeId, amount);
+    let receipt = receiptFor(request.quote, amount, now);
+    switch (Kernel.checkExecuteForCaller(caller, request.quote, request.guard, receipt, now, status)) {
+      case (?err) { #err(err) };
+      case null {
+        Kernel.executableForCallerImpliesReceiptAccepted(caller, request.quote, request.guard, receipt, now, status);
+        switch (commit(request.quote.account, request.quote.edgeId, amount, receipt)) {
+          case null { #ok(receipt) };
+          case (?err) { #err(err) }
+        }
+      }
+    }
+  };
+
+  public shared({ caller }) func spi_103_icrc_deposit(
+    request : IcrcDepositRequest
+  ) : async Result<IcrcDepositReceipt, IcrcDepositError>
+    reads tokenA, tokenB, balancesA, balancesB, lpShares
+    modifies balancesA, balancesB
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (not supportedLedger(request.ledger)) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    if (request.from.owner != caller) {
+      return #err(#sourceOwnerMismatch({
+        caller = caller;
+        fromOwner = request.from.owner
+      }))
+    };
+
+    let nextBalance = if (request.ledger == tokenA) {
+      balancesA := mapCredit(balancesA, request.account, request.amount);
+      mapBalance(balancesA, request.account)
+    } else {
+      balancesB := mapCredit(balancesB, request.account, request.amount);
+      mapBalance(balancesB, request.account)
+    };
+    #ok({
+      account = request.account;
+      ledger = request.ledger;
+      from = request.from;
+      amount = request.amount;
+      txIndex = request.amount;
+      balanceAfter = nextBalance
+    })
+  };
+
+  public shared({ caller }) func spi_103_icrc_withdraw(
+    request : IcrcWithdrawRequest
+  ) : async Result<IcrcWithdrawReceipt, IcrcWithdrawError>
+    reads tokenA, tokenB, balancesA, balancesB, lpShares
+    modifies balancesA, balancesB
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (not supportedLedger(request.ledger)) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+
+    let previous = if (request.ledger == tokenA) {
+      mapBalance(balancesA, request.account)
+    } else {
+      mapBalance(balancesB, request.account)
+    };
+    if (previous < request.amount) {
+      return #err(#insufficientLocalBalance)
+    };
+
+    let nextBalance = previous - request.amount;
+    if (request.ledger == tokenA) {
+      balancesA := mapSet(balancesA, request.account, nextBalance)
+    } else {
+      balancesB := mapSet(balancesB, request.account, nextBalance)
+    };
+    #ok({
+      account = request.account;
+      ledger = request.ledger;
+      to = request.to;
+      amount = request.amount;
+      fee = 0;
+      debitAmount = request.amount;
+      txIndex = request.amount;
+      balanceAfter = nextBalance
+    })
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : WalletRequest
+  ) : async Result<WalletReceipt, WalletError>
+    reads tokenA, tokenB, balancesA, balancesB, lpShares
+  {
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    let amountA = mapBalance(balancesA, request.account);
+    let amountB = mapBalance(balancesB, request.account);
+    let shares = mapBalance(lpShares, request.account);
+    if (amountA == 0 and amountB == 0 and shares == 0) {
+      #ok(SPI101.walletReceipt(request.account, []))
+    } else if (amountA > 0 and amountB == 0 and shares == 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenA), amountA, "Token A balance")]))
+    } else if (amountA == 0 and amountB > 0 and shares == 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenB), amountB, "Token B balance")]))
+    } else if (amountA == 0 and amountB == 0 and shares > 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(lpNode(), shares, "LP share balance")]))
+    } else if (amountA > 0 and amountB > 0 and shares == 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenA), amountA, "Token A balance"), walletEntry(ledgerNode(tokenB), amountB, "Token B balance")]))
+    } else if (amountA > 0 and amountB == 0 and shares > 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenA), amountA, "Token A balance"), walletEntry(lpNode(), shares, "LP share balance")]))
+    } else if (amountA == 0 and amountB > 0 and shares > 0) {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenB), amountB, "Token B balance"), walletEntry(lpNode(), shares, "LP share balance")]))
+    } else {
+      #ok(SPI101.walletReceipt(request.account, [walletEntry(ledgerNode(tokenA), amountA, "Token A balance"), walletEntry(ledgerNode(tokenB), amountB, "Token B balance"), walletEntry(lpNode(), shares, "LP share balance")]))
+    }
+  };
+
+  public query func pool_state() : async {
+    reserveA : Nat;
+    reserveB : Nat;
+    totalLp : Nat
+  }
+    reads reserveA, reserveB, totalLp
+  {
+    {
+      reserveA = reserveA;
+      reserveB = reserveB;
+      totalLp = totalLp
+    }
+  }
+}

@@ -1,0 +1,279 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import AccountLedgerBook "mo:spi/research/103_alt_b_inflight_restore/examples/AccountLedgerBook";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import Kernel "mo:spi/research/103_alt_b_inflight_restore/Kernel";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
+import SPI101 "mo:spi/101/Wallet";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+persistent actor class InFlightRestoreBridgeActor(
+  supportedLedger : Principal,
+  minDeposit : Nat
+) {
+  public type Result<Ok, Err> = SPI101.Result<Ok, Err>;
+  public type WalletRequest = SPI101.WalletRequest;
+  public type WalletReceipt = SPI101.WalletReceipt;
+  public type WalletError = SPI101.WalletError;
+  public type IcrcDepositRequest = SPI103.IcrcDepositRequest;
+  public type IcrcDepositReceipt = SPI103.IcrcDepositReceipt;
+  public type IcrcDepositError = SPI103.IcrcDepositError;
+  public type IcrcWithdrawRequest = SPI103.IcrcWithdrawRequest;
+  public type IcrcWithdrawReceipt = SPI103.IcrcWithdrawReceipt;
+  public type IcrcWithdrawError = SPI103.IcrcWithdrawError;
+
+  var balances : AccountLedgerBook.AccountLedgerBook = AccountLedgerBook.empty();
+  var pendingWithdraw : ?SPI103.PendingIcrcWithdrawal = null;
+
+  invariant AccountLedgerBook.ordered(balances);
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  private pure func bridgeAccount() : ICRCLedger.Account
+    requires true;
+  {
+    { owner = Runtime.selfId(); subaccount = null }
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared({ caller }) func spi_103_icrc_deposit(
+    request : IcrcDepositRequest
+  ) : async Result<IcrcDepositReceipt, IcrcDepositError>
+    reads supportedLedger, minDeposit
+    modifies balances
+    ensures AccountLedgerBook.ordered(balances);
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.amount < minDeposit) {
+      return #err(#amountTooLow({
+        amount = request.amount;
+        minAmount = minDeposit
+      }))
+    };
+    if (request.ledger != supportedLedger) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    if (request.from.owner != caller) {
+      return #err(#sourceOwnerMismatch({
+        caller = caller;
+        fromOwner = request.from.owner
+      }))
+    };
+    assert Kernel.canStartIcrcDeposit(caller, supportedLedger, minDeposit, request);
+    let remote = ICRCLedger.fromPrincipal(request.ledger);
+    let args : ICRCLedger.TransferFromArgs = {
+      to = bridgeAccount();
+      fee = null;
+      spender_subaccount = null;
+      from = request.from;
+      memo = null;
+      created_at_time = null;
+      amount = request.amount
+    };
+    try {
+      let ledgerResult = await remote.icrc2_transfer_from(args);
+      switch (ledgerResult) {
+        case (#Ok txIndex) {
+          let current = AccountLedgerBook.balance(balances, request.account, request.ledger);
+          let next = AccountLedgerBook.creditFromKnownBalance(
+            balances,
+            request.account,
+            request.ledger,
+            request.amount,
+            current
+          );
+          assert AccountLedgerBook.balance(next, request.account, request.ledger) == current + request.amount;
+          balances := next;
+          let after = AccountLedgerBook.balance(balances, request.account, request.ledger);
+          assert after == current + request.amount;
+          assert Kernel.depositSuccessCreditsExactly(current, request.amount, after);
+          #ok({
+            account = request.account;
+            ledger = request.ledger;
+            from = request.from;
+            amount = request.amount;
+            txIndex = txIndex;
+            balanceAfter = after
+          })
+        };
+        case (#Err err) {
+          #err(#icrcTransferFromErr(err))
+        }
+      }
+    } catch (_) {
+      #err(#icrcTransferFromRejected({ message = "ledger rejected transfer_from" }))
+    }
+  };
+
+  public shared({ caller }) func spi_103_icrc_withdraw(
+    request : IcrcWithdrawRequest
+  ) : async Result<IcrcWithdrawReceipt, IcrcWithdrawError>
+    reads supportedLedger
+    modifies balances, pendingWithdraw
+    ensures AccountLedgerBook.ordered(balances);
+    ensures switch (result) {
+      case (#ok(_)) { pendingWithdraw == null };
+      case (#err(#icrcTransferErr(_))) { pendingWithdraw == null };
+      case (#err(#icrcTransferRejected(_))) { pendingWithdraw == null };
+      case (_) { true }
+    };
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.ledger != supportedLedger) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    switch (pendingWithdraw) {
+      case (?pending) { return #err(#withdrawInProgress(pending)) };
+      case null {}
+    };
+    assert Kernel.canStartIcrcWithdraw(caller, supportedLedger, request);
+    let remote = ICRCLedger.fromPrincipal(request.ledger);
+    let feeResult : Result<Nat, IcrcWithdrawError> = try {
+      let feeValue = await remote.icrc1_fee();
+      #ok(feeValue)
+    } catch (_) {
+      #err(#icrcFeeRejected({ message = "ledger rejected fee" }))
+    };
+    switch (feeResult) {
+      case (#err err) {
+        assert pendingWithdraw == null;
+        #err(err)
+      };
+      case (#ok fee) {
+        let before = AccountLedgerBook.balance(balances, request.account, request.ledger);
+        let debitAmount = Kernel.withdrawDebitAmount(request.amount, fee);
+        switch (AccountLedgerBook.debitFromKnownBalance(balances, request.account, request.ledger, debitAmount, before)) {
+          case null {
+            assert pendingWithdraw == null;
+            #err(#insufficientLocalBalance)
+          };
+          case (?next) {
+            balances := next;
+            let pending : SPI103.PendingIcrcWithdrawal = {
+              account = request.account;
+              ledger = request.ledger;
+              to = request.to;
+              amount = request.amount;
+              fee = fee;
+              debitAmount = debitAmount
+            };
+            pendingWithdraw := ?pending;
+            let during = AccountLedgerBook.balance(balances, request.account, request.ledger);
+            assert Kernel.withdrawalStarted(before, request.amount, fee, during, pending);
+            let args : ICRCLedger.TransferArg = {
+              to = request.to;
+              fee = ?fee;
+              memo = null;
+              from_subaccount = null;
+              created_at_time = null;
+              amount = request.amount
+            };
+            try {
+              let ledgerResult = await remote.icrc1_transfer(args);
+              switch (ledgerResult) {
+                case (#Ok txIndex) {
+                  pendingWithdraw := null;
+                  let after = AccountLedgerBook.balance(balances, request.account, request.ledger);
+                  assert pendingWithdraw == null;
+                  let receipt : IcrcWithdrawReceipt = {
+                    account = request.account;
+                    ledger = request.ledger;
+                    to = request.to;
+                    amount = request.amount;
+                    fee = fee;
+                    debitAmount = debitAmount;
+                    txIndex = txIndex;
+                    balanceAfter = after
+                  };
+                  assert Kernel.withdrawReceiptChargesFee(request, fee, receipt);
+                  #ok(receipt)
+                };
+                case (#Err err) {
+                  let restoreBase = AccountLedgerBook.balance(balances, request.account, request.ledger);
+                  balances := AccountLedgerBook.creditFromKnownBalance(
+                    balances,
+                    request.account,
+                    request.ledger,
+                    pending.debitAmount,
+                    restoreBase
+                  );
+                  pendingWithdraw := null;
+                  let after = AccountLedgerBook.balance(balances, request.account, request.ledger);
+                  assert Kernel.withdrawFailureRestoresReservedDebit(restoreBase, pending, after, pendingWithdraw == null);
+                  #err(#icrcTransferErr(err))
+                }
+              }
+            } catch (_) {
+              let restoreBase = AccountLedgerBook.balance(balances, request.account, request.ledger);
+              balances := AccountLedgerBook.creditFromKnownBalance(
+                balances,
+                request.account,
+                request.ledger,
+                pending.debitAmount,
+                restoreBase
+              );
+              pendingWithdraw := null;
+              let after = AccountLedgerBook.balance(balances, request.account, request.ledger);
+              assert Kernel.withdrawFailureRestoresReservedDebit(restoreBase, pending, after, pendingWithdraw == null);
+              #err(#icrcTransferRejected({ message = "ledger rejected transfer" }))
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : WalletRequest
+  ) : async Result<WalletReceipt, WalletError>
+    reads supportedLedger, balances
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    let amount = AccountLedgerBook.balance(balances, request.account, supportedLedger);
+    if (amount == 0) {
+      #ok(SPI101.walletReceipt(request.account, []))
+    } else {
+      #ok(SPI101.walletReceipt(
+        request.account,
+        [SPI101.externalLedgerWalletEntry(supportedLedger, amount, ?"Supported ICRC ledger")]
+      ))
+    }
+  };
+
+  public shared query func raw_pending() : async ?SPI103.PendingIcrcWithdrawal
+    reads pendingWithdraw
+  {
+    pendingWithdraw
+  }
+}

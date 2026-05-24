@@ -1,0 +1,235 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import NatCore "mo:core/Nat";
+import Prim "mo:⛔";
+import Runtime "mo:core/Runtime";
+import Text "mo:core/Text";
+import Types "./Types";
+
+module {
+  public let NAT64_MAX : Nat = 18_446_744_073_709_551_615;
+  public let NAT64_MAX_VALUE : Nat64 = 18_446_744_073_709_551_615;
+
+  public type SpiDepositReceipt = {
+    ledger : Principal;
+    from : ICRCLedger.Account;
+    subject : Principal;
+    amount : Nat;
+    txIndex : Nat;
+    balanceAfter : Nat
+  };
+
+  public type SpiPendingWithdrawal = {
+    subject : Principal;
+    ledger : Principal;
+    to : ICRCLedger.Account;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat
+  };
+
+  public type SpiWithdrawReceipt = {
+    ledger : Principal;
+    to : ICRCLedger.Account;
+    subject : Principal;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    txIndex : Nat;
+    balanceAfter : Nat
+  };
+
+  public pure func ledgerReject() : Types.LedgerReject
+    requires true;
+    ensures result.message == "ledger call rejected";
+  {
+    { message = "ledger call rejected" }
+  };
+
+  public func ledgerCreatedAtTime() : Nat64
+    requires true;
+    ensures result <= NAT64_MAX_VALUE;
+  {
+    Prim.time()
+  };
+
+  public func ledgerCreatedAtTimeNat(time : Nat64) : Nat
+    requires time <= NAT64_MAX_VALUE;
+    ensures result <= NAT64_MAX;
+  {
+    Prim.nat64ToNat(time)
+  };
+
+  public func natToLedgerCreatedAtTime(time : Nat) : Nat64
+    requires time <= NAT64_MAX;
+    ensures result <= NAT64_MAX_VALUE;
+  {
+    Prim.natToNat64(time)
+  };
+
+  public func operationMemo(kind : Text, operationId : Nat) : Blob
+    requires true;
+    ensures true;
+  {
+    Text.encodeUtf8("dao:" # kind # ":" # NatCore.toText(operationId))
+  };
+
+  public pure func subjectAuthError(
+    caller : Principal,
+    subject : Principal
+  ) : {
+    caller : Principal;
+    subject : Principal
+  }
+    requires true;
+    ensures result.caller == caller;
+    ensures result.subject == subject;
+  {
+    { caller = caller; subject = subject }
+  };
+
+  public func depositTransferFromArgs(
+    from : ICRCLedger.Account,
+    amount : Nat,
+    operationId : Nat,
+    createdAtTime : Nat64
+  ) : ICRCLedger.TransferFromArgs
+    requires true;
+    ensures result.to.owner == Runtime.selfId();
+    ensures result.to.subaccount == null;
+    ensures result.from.owner == from.owner;
+    ensures result.from.subaccount == from.subaccount;
+    ensures result.spender_subaccount == null;
+    ensures result.fee == null;
+    ensures switch (result.memo) { case (?_) { true }; case null { false } };
+    ensures result.created_at_time == ?createdAtTime;
+    ensures result.amount == amount;
+  {
+    {
+      to = { owner = Runtime.selfId(); subaccount = null };
+      fee = null;
+      spender_subaccount = null;
+      from = from;
+      memo = ?operationMemo("deposit", operationId);
+      created_at_time = ?createdAtTime;
+      amount = amount
+    }
+  };
+
+  public func withdrawTransferArgs(
+    to : ICRCLedger.Account,
+    started : Types.WithdrawStarted
+  ) : ICRCLedger.TransferArg
+    requires started.createdAtTime <= NAT64_MAX;
+    ensures result.to.owner == to.owner;
+    ensures result.to.subaccount == to.subaccount;
+    ensures result.fee == ?started.fee;
+    ensures switch (result.memo) { case (?_) { true }; case null { false } };
+    ensures result.from_subaccount == null;
+    ensures switch (result.created_at_time) { case (?_) { true }; case null { false } };
+    ensures result.amount == started.amount;
+  {
+    {
+      to = to;
+      fee = ?started.fee;
+      memo = ?operationMemo("withdraw", started.operationId);
+      from_subaccount = null;
+      created_at_time = ?natToLedgerCreatedAtTime(started.createdAtTime);
+      amount = started.amount
+    }
+  };
+
+  public pure func spiDepositReceipt(
+    subject : Principal,
+    from : ICRCLedger.Account,
+    receipt : Types.DepositReceipt
+  ) : SpiDepositReceipt
+    requires true;
+    ensures result.subject == subject;
+    ensures result.ledger == receipt.ledger;
+    ensures result.amount == receipt.amount;
+    ensures result.txIndex == receipt.txIndex;
+    ensures result.balanceAfter == receipt.liquidBalance;
+  {
+    {
+      ledger = receipt.ledger;
+      from = from;
+      subject = subject;
+      amount = receipt.amount;
+      txIndex = receipt.txIndex;
+      balanceAfter = receipt.liquidBalance
+    }
+  };
+
+  public pure func spiPendingWithdrawal(
+    subject : Principal,
+    ledger : Principal,
+    to : ICRCLedger.Account,
+    pending : Types.PendingWithdrawal
+  ) : SpiPendingWithdrawal
+    requires true;
+    ensures result.subject == subject;
+    ensures result.ledger == ledger;
+    ensures result.amount == pending.amount;
+    ensures result.fee == pending.fee;
+    ensures result.debitAmount == pending.debitAmount;
+  {
+    {
+      subject = subject;
+      ledger = ledger;
+      to = to;
+      amount = pending.amount;
+      fee = pending.fee;
+      debitAmount = pending.debitAmount
+    }
+  };
+
+  public pure func spiPendingFromRequest(
+    subject : Principal,
+    ledger : Principal,
+    to : ICRCLedger.Account,
+    amount : Nat,
+    fee : Nat
+  ) : SpiPendingWithdrawal
+    requires true;
+    ensures result.subject == subject;
+    ensures result.ledger == ledger;
+    ensures result.amount == amount;
+    ensures result.fee == fee;
+    ensures result.debitAmount == amount + fee;
+  {
+    {
+      subject = subject;
+      ledger = ledger;
+      to = to;
+      amount = amount;
+      fee = fee;
+      debitAmount = amount + fee
+    }
+  };
+
+  public pure func spiWithdrawReceipt(
+    subject : Principal,
+    to : ICRCLedger.Account,
+    receipt : Types.WithdrawReceipt
+  ) : SpiWithdrawReceipt
+    requires true;
+    ensures result.subject == subject;
+    ensures result.ledger == receipt.ledger;
+    ensures result.amount == receipt.amount;
+    ensures result.fee == receipt.fee;
+    ensures result.debitAmount == receipt.debitAmount;
+    ensures result.txIndex == receipt.txIndex;
+    ensures result.balanceAfter == receipt.liquidBalance;
+  {
+    {
+      ledger = receipt.ledger;
+      to = to;
+      subject = subject;
+      amount = receipt.amount;
+      fee = receipt.fee;
+      debitAmount = receipt.debitAmount;
+      txIndex = receipt.txIndex;
+      balanceAfter = receipt.liquidBalance
+    }
+  };
+}

@@ -1,0 +1,119 @@
+import BMap "mo:core/pure/BMap";
+import Blob "mo:core/Blob";
+import Principal "mo:core/Principal";
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+import Types "mo:core/Types";
+
+module {
+  public type NodeKey = Blob;
+  public type RecordKey = {
+    account : SPI100.Account;
+    node : NodeKey
+  };
+  public type AccountNodeBook = BMap.BMap<RecordKey, Nat>;
+
+  public pure func nodeKey(node : SPI101.NodeId) : NodeKey
+    requires true;
+  {
+    switch (node) {
+      case (#ledger ledger) {
+        Blob.appendNat32BEByte(Principal.toBlob(ledger), 0, 1)
+      };
+      case (#local payload) {
+        Blob.appendNat32BEByte(payload, 0, 2)
+      }
+    }
+  };
+
+  public pure func compare(a : RecordKey, b : RecordKey) : Types.Order
+    requires true;
+    ensures result == #equal ==> a == b;
+  {
+    switch (Blob.compare(a.account, b.account)) {
+      case (#less) { #less };
+      case (#greater) { #greater };
+      case (#equal) { Blob.compare(a.node, b.node) }
+    }
+  };
+
+  public func empty() : AccountNodeBook
+    requires true;
+    ensures ordered(result);
+  {
+    BMap.orderedBy_empty<RecordKey, Nat>(compare);
+    BMap.empty<RecordKey, Nat>()
+  };
+
+  public pure func ordered(book : AccountNodeBook) : Bool
+    requires true;
+  {
+    BMap.orderedBy<RecordKey, Nat>(book, compare)
+  };
+
+  public pure func recordKey(account : SPI100.Account, node : SPI101.NodeId) : RecordKey
+    requires true;
+    ensures result.account == account;
+    ensures result.node == nodeKey(node);
+  {
+    {
+      account = account;
+      node = nodeKey(node)
+    }
+  };
+
+  public pure func balance(
+    book : AccountNodeBook,
+    account : SPI100.Account,
+    node : SPI101.NodeId
+  ) : Nat
+    requires ordered(book);
+  {
+    switch (BMap.get<RecordKey, Nat>(book, compare, recordKey(account, node))) {
+      case null { 0 };
+      case (?amount) { amount }
+    }
+  };
+
+  public func credit(
+    book : AccountNodeBook,
+    account : SPI100.Account,
+    node : SPI101.NodeId,
+    amount : Nat
+  ) : AccountNodeBook
+    requires ordered(book);
+    ensures ordered(result);
+  {
+    BMap.add<RecordKey, Nat>(
+      book,
+      compare,
+      recordKey(account, node),
+      balance(book, account, node) + amount
+    )
+  };
+
+  public func debit(
+    book : AccountNodeBook,
+    account : SPI100.Account,
+    node : SPI101.NodeId,
+    amount : Nat
+  ) : ?AccountNodeBook
+    requires ordered(book);
+    ensures switch (result) {
+      case null { true };
+      case (?next) { ordered(next) }
+    };
+  {
+    let previous = balance(book, account, node);
+    if (previous < amount) {
+      null
+    } else {
+      ?BMap.add<RecordKey, Nat>(
+        book,
+        compare,
+        recordKey(account, node),
+        previous - amount
+      )
+    }
+  };
+}

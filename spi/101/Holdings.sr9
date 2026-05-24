@@ -1,0 +1,40 @@
+module {
+  // Experimental generic holding profile. This is useful for protocol-specific
+  // surfaces that want typed metadata in the variant payloads.
+  public type Holding<FungibleMeta, NonfungibleMeta> = {
+    #fungible : {
+      amount : Nat;
+      meta : FungibleMeta
+    };
+    #nonfungible : {
+      id : Nat;
+      meta : NonfungibleMeta
+    }
+  };
+
+  public pure trusted func fungible<FungibleMeta, NonfungibleMeta>(
+    amount : Nat,
+    meta : FungibleMeta
+  ) : Holding<FungibleMeta, NonfungibleMeta>
+    requires true;
+    ensures true;
+  {
+    #fungible({
+      amount = amount;
+      meta = meta
+    })
+  };
+
+  public pure trusted func nonfungible<FungibleMeta, NonfungibleMeta>(
+    id : Nat,
+    meta : NonfungibleMeta
+  ) : Holding<FungibleMeta, NonfungibleMeta>
+    requires true;
+    ensures true;
+  {
+    #nonfungible({
+      id = id;
+      meta = meta
+    })
+  };
+}

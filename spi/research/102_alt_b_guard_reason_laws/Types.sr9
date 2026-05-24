@@ -1,0 +1,29 @@
+import Base "mo:spi/102/Types";
+
+module {
+  public type Result<Ok, Err> = Base.Result<Ok, Err>;
+
+  public type GuardRejectReason = {
+    #deadline;
+    #minReceive;
+    #maxSpend;
+    #maxFee;
+    #protocolSpecific : Text
+  };
+
+  public type ExecuteError = {
+    #accountNotAuthorized : {
+      caller : Principal;
+      account : Blob
+    };
+    #quoteReceiptMismatch;
+    #guardRejected : GuardRejectReason;
+    #edgeNotLive : Base.DiscoveryStatus;
+    #unknownEdge;
+    #invalidAmount;
+    #insufficientInput;
+    #expiredQuote;
+    #protocolSpecific : Text
+  };
+}
+

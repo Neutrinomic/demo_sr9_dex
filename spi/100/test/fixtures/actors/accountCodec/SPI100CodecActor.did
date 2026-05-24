@@ -1,0 +1,22 @@
+type Wallet = principal;
+type SPI100CodecActor = 
+ service {
+   spi_100_account_id: (account: Account) -> (opt nat) query;
+   spi_100_account_wallet: (account: Account) -> (opt principal) query;
+   spi_100_base58_decode: ("text": text) -> (opt blob) query;
+   spi_100_base58_encode: ("blob": blob) -> (text) query;
+   spi_100_belongs_to_wallet: (account: Account, wallet: principal) ->
+    (bool) query;
+   spi_100_decode: (account: Account) -> (opt DecodedAccount) query;
+   spi_100_encode: (wallet: principal, id: nat) -> (opt Account) query;
+   spi_100_text_decode: ("text": text) -> (opt Account) query;
+   spi_100_text_encode: (account: Account) -> (opt text) query;
+ };
+type LocalId = nat;
+type DecodedAccount = 
+ record {
+   id: LocalId;
+   wallet: Wallet;
+ };
+type Account = blob;
+service : () -> SPI100CodecActor

@@ -1,0 +1,195 @@
+import Types "mo:spi/research/103_alt_c_operation_id/Types";
+
+module {
+  public type OperationSlot = {
+    operationId : ?Types.OperationId;
+    status : ?Types.OperationStatus
+  };
+
+  public type OperationBook = {
+    slot0 : OperationSlot;
+    slot1 : OperationSlot;
+    slot2 : OperationSlot;
+    slot3 : OperationSlot
+  };
+
+  public pure func emptySlot() : OperationSlot
+    requires true;
+    ensures slotOrdered(result);
+  {
+    {
+      operationId = null;
+      status = null
+    }
+  };
+
+  public pure func empty() : OperationBook
+    requires true;
+    ensures ordered(result);
+  {
+    let slot = emptySlot();
+    {
+      slot0 = slot;
+      slot1 = slot;
+      slot2 = slot;
+      slot3 = slot
+    }
+  };
+
+  public pure func slotOrdered(slot : OperationSlot) : Bool
+    requires true;
+    ensures result == (
+      switch (slot.operationId, slot.status) {
+        case (null, null) { true };
+        case ((?_id), (?_status)) { true };
+        case (_) { false }
+      }
+    );
+  {
+    switch (slot.operationId, slot.status) {
+      case (null, null) { true };
+      case ((?_id), (?_status)) { true };
+      case (_) { false }
+    }
+  };
+
+  public pure func slotHas(slot : OperationSlot, operationId : Types.OperationId) : Bool
+    requires true;
+  {
+    switch (slot.operationId) {
+      case null { false };
+      case (?id) { id == operationId }
+    }
+  };
+
+  public pure func slotGet(slot : OperationSlot, operationId : Types.OperationId) : ?Types.OperationStatus
+    requires true;
+  {
+    switch (slot.operationId, slot.status) {
+      case ((?id), (?status)) {
+        if (id == operationId) { ?status } else { null }
+      };
+      case (_) { null }
+    }
+  };
+
+  public pure func slotPut(operationId : Types.OperationId, status : Types.OperationStatus) : OperationSlot
+    requires true;
+    ensures slotOrdered(result);
+    ensures slotGet(result, operationId) == ?status;
+  {
+    {
+      operationId = ?operationId;
+      status = ?status
+    }
+  };
+
+  public pure func noDuplicateIds(book : OperationBook) : Bool
+    requires true;
+  {
+    let s0 = book.slot0.operationId;
+    let s1 = book.slot1.operationId;
+    let s2 = book.slot2.operationId;
+    let s3 = book.slot3.operationId;
+    (s0 == null or (s0 != s1 and s0 != s2 and s0 != s3)) and
+      (s1 == null or (s1 != s2 and s1 != s3)) and
+      (s2 == null or s2 != s3)
+  };
+
+  public pure func ordered(book : OperationBook) : Bool
+    requires true;
+  {
+    slotOrdered(book.slot0) and
+      slotOrdered(book.slot1) and
+      slotOrdered(book.slot2) and
+      slotOrdered(book.slot3) and
+      noDuplicateIds(book)
+  };
+
+  public pure func get(book : OperationBook, operationId : Types.OperationId) : ?Types.OperationStatus
+    requires ordered(book);
+  {
+    switch (slotGet(book.slot0, operationId)) {
+      case (?status) { ?status };
+      case null {
+        switch (slotGet(book.slot1, operationId)) {
+          case (?status) { ?status };
+          case null {
+            switch (slotGet(book.slot2, operationId)) {
+              case (?status) { ?status };
+              case null { slotGet(book.slot3, operationId) }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public pure func put(
+    book : OperationBook,
+    operationId : Types.OperationId,
+    status : Types.OperationStatus
+  ) : OperationBook
+    requires ordered(book);
+    ensures ordered(result);
+    ensures get(result, operationId) == ?status;
+  {
+    if (slotHas(book.slot0, operationId)) {
+      {
+        slot0 = slotPut(operationId, status);
+        slot1 = book.slot1;
+        slot2 = book.slot2;
+        slot3 = book.slot3
+      }
+    } else if (slotHas(book.slot1, operationId)) {
+      {
+        slot0 = book.slot0;
+        slot1 = slotPut(operationId, status);
+        slot2 = book.slot2;
+        slot3 = book.slot3
+      }
+    } else if (slotHas(book.slot2, operationId)) {
+      {
+        slot0 = book.slot0;
+        slot1 = book.slot1;
+        slot2 = slotPut(operationId, status);
+        slot3 = book.slot3
+      }
+    } else if (slotHas(book.slot3, operationId)) {
+      {
+        slot0 = book.slot0;
+        slot1 = book.slot1;
+        slot2 = book.slot2;
+        slot3 = slotPut(operationId, status)
+      }
+    } else if (book.slot0.operationId == null) {
+      {
+        slot0 = slotPut(operationId, status);
+        slot1 = book.slot1;
+        slot2 = book.slot2;
+        slot3 = book.slot3
+      }
+    } else if (book.slot1.operationId == null) {
+      {
+        slot0 = book.slot0;
+        slot1 = slotPut(operationId, status);
+        slot2 = book.slot2;
+        slot3 = book.slot3
+      }
+    } else if (book.slot2.operationId == null) {
+      {
+        slot0 = book.slot0;
+        slot1 = book.slot1;
+        slot2 = slotPut(operationId, status);
+        slot3 = book.slot3
+      }
+    } else {
+      {
+        slot0 = book.slot0;
+        slot1 = book.slot1;
+        slot2 = book.slot2;
+        slot3 = slotPut(operationId, status)
+      }
+    }
+  };
+}

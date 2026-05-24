@@ -1,0 +1,34 @@
+{
+  "workspaceRoot": "../../../..",
+  "actorFixturesDir": "fixtures/actors",
+  "defaultActor": "bridge",
+  "test": {
+    "specGlob": "spec/**/*.test.ts",
+    "timeoutMs": 240000,
+    "reportsDir": "reports",
+    "exceptionsFile": "exceptions.ts"
+  },
+  "actors": {
+    "bridge": {
+      "name": "InFlightRestoreBridgeActor",
+      "source": "../examples/InFlightRestoreBridgeActor.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        { "name": "core", "path": "core/src", "env": "CORE_PACKAGE_PATH", "findUp": true, "bundledFallback": true },
+        { "name": "spi", "path": "spi", "env": "SPI_PACKAGE_PATH", "findUp": true }
+      ]
+    },
+    "mockLedger": {
+      "name": "MockIcrcLedger",
+      "source": "../examples/MockIcrcLedger.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        { "name": "core", "path": "core/src", "env": "CORE_PACKAGE_PATH", "findUp": true, "bundledFallback": true },
+        { "name": "spi", "path": "spi", "env": "SPI_PACKAGE_PATH", "findUp": true }
+      ]
+    }
+  }
+}
+

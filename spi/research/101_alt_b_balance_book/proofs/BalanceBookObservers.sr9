@@ -1,0 +1,68 @@
+import AccountNodeBook "mo:spi/research/101_alt_b_balance_book/examples/AccountNodeBook";
+import Kernel "mo:spi/research/101_alt_b_balance_book/Kernel";
+import Principal "mo:core/Principal";
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public func emptyBookOrdered() : Bool
+    requires true;
+    ensures result;
+  {
+    AccountNodeBook.ordered(AccountNodeBook.empty())
+  };
+
+  public func creditBookOrdered(account : SPI100.Account, ledger : Principal, amount : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    let book = AccountNodeBook.empty();
+    let next = AccountNodeBook.credit(book, account, #ledger(ledger), amount);
+    AccountNodeBook.ordered(next)
+  };
+
+  public pure func debitAllowedExact(balance : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.debitAllowed(balance, balance)
+  };
+
+  public pure func singleExportNonzero(entry : SPI101.WalletEntry) : Bool
+    requires Kernel.singleFungibleExportLaw(entry);
+    ensures Kernel.fungibleExportNonzero(entry);
+  {
+    Kernel.fungibleExportNonzero(entry)
+  };
+
+  public pure func pairExportHasNoDuplicateNode(
+    first : SPI101.WalletEntry,
+    second : SPI101.WalletEntry
+  ) : Bool
+    requires Kernel.pairFungibleExportLaw(first, second);
+    ensures first.node != second.node;
+  {
+    Kernel.noDuplicateExportNode(first, second)
+  };
+
+  public pure func exportedAmountNonzero(amount : Nat) : Bool
+    requires Kernel.singleExportAmountLaw(amount);
+    ensures amount > 0;
+  {
+    Kernel.exportAmountNonzero(amount)
+  };
+
+  public pure func exportedPairHasNoDuplicateNode(
+    firstNode : SPI101.NodeId,
+    firstAmount : Nat,
+    secondNode : SPI101.NodeId,
+    secondAmount : Nat
+  ) : Bool
+    requires Kernel.pairExportAmountLaw(firstNode, firstAmount, secondNode, secondAmount);
+    ensures firstAmount > 0;
+    ensures secondAmount > 0;
+    ensures firstNode != secondNode;
+  {
+    Kernel.exportNodesDistinct(firstNode, secondNode)
+  };
+}

@@ -1,0 +1,31 @@
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public type OperationId = Nat;
+
+  public type DepositWithIdRequest = {
+    operationId : OperationId;
+    request : SPI103.IcrcDepositRequest;
+    memo : ?Blob;
+    createdAtTime : ?Nat64
+  };
+
+  public type WithdrawWithIdRequest = {
+    operationId : OperationId;
+    request : SPI103.IcrcWithdrawRequest;
+    memo : ?Blob;
+    createdAtTime : ?Nat64
+  };
+
+  public type OperationStatus = {
+    #depositOk : SPI103.IcrcDepositReceipt;
+    #withdrawOk : SPI103.IcrcWithdrawReceipt;
+    #failed : Text;
+    #reconciliationNeeded : {
+      account : Blob;
+      operationId : OperationId;
+      reason : Text
+    }
+  };
+}
+

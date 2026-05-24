@@ -1,0 +1,788 @@
+import Types "mo:spi/102/Types";
+import SPI100 "mo:spi/100/AccountCodec";
+
+module {
+  public pure func sameScopedId(a : Types.ScopedId, b : Types.ScopedId) : Bool
+    requires true;
+    ensures result == (a.scope == b.scope and a.namespace == b.namespace and a.id == b.id);
+  {
+    a.scope == b.scope and a.namespace == b.namespace and a.id == b.id
+  };
+
+  public pure func sameEdgeId(a : Types.EdgeId, b : Types.EdgeId) : Bool
+    requires true;
+    ensures result == sameScopedId(a, b);
+  {
+    sameScopedId(a, b)
+  };
+
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func discoveryReturned(
+    request : Types.DiscoverRequest,
+    discovery : Types.Discovery
+  ) : Bool
+    requires true;
+    ensures result == (
+      discovery.account == request.account and
+        discovery.nodes.size() > 0 and
+        discovery.edges.size() > 0
+    );
+  {
+    discovery.account == request.account and
+      discovery.nodes.size() > 0 and
+      discovery.edges.size() > 0
+  };
+
+  public pure func quoteLive(q : Types.Quote, now : Int) : Bool
+    requires true;
+  {
+    switch (q.expiresAt) {
+      case null { true };
+      case (?deadline) { now <= deadline }
+    }
+  };
+
+  public pure func edgeStatusLive(status : Types.DiscoveryStatus) : Bool
+    requires true;
+  {
+    switch (status) {
+      case (#live) { true };
+      case _ { false }
+    }
+  };
+
+  public pure func receiptBindsQuote(q : Types.Quote, r : Types.Receipt) : Bool
+    requires true;
+    ensures result == (r.account == q.account and sameEdgeId(r.edgeId, q.edgeId));
+  {
+    r.account == q.account and sameEdgeId(r.edgeId, q.edgeId)
+  };
+
+  // Generic unbounded laws use protocol-provided projection keys. The kernel
+  // does not try to order `NodeId` records directly; implementations expose a
+  // deterministic, injective Nat key for each node/edge in the basket or
+  // discovery page.
+  public type ProjectionKey = Nat;
+
+  public lemma projectedAmountNonzero(amounts : [Nat], i : Nat) : ()
+    reads amounts
+    requires forall<Nat>(pure func (j : Nat) : Bool =
+      j < amounts.size() ==> amounts[j] > 0);
+    requires i < amounts.size();
+    ensures amounts[i] > 0;
+  {
+    assert amounts[i] > 0;
+  };
+
+  public lemma projectedKeysUniqueForward(keys : [ProjectionKey], i : Nat, j : Nat) : ()
+    reads keys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < keys.size() and b < keys.size() and a < b) ==>
+          keys[a] != keys[b]));
+    requires i < keys.size();
+    requires j < keys.size();
+    requires i < j;
+    ensures keys[i] != keys[j];
+  {
+    assert keys[i] != keys[j];
+  };
+
+  public lemma projectedSortedKeysDistinctForward(keys : [ProjectionKey], i : Nat, j : Nat) : ()
+    reads keys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < keys.size() and b < keys.size() and a < b) ==>
+          keys[a] < keys[b]));
+    requires i < keys.size();
+    requires j < keys.size();
+    requires i < j;
+    ensures keys[i] < keys[j];
+    ensures keys[i] != keys[j];
+  {
+    assert keys[i] < keys[j];
+  };
+
+  public lemma projectedSortedKeysDistinct(keys : [ProjectionKey], i : Nat, j : Nat) : ()
+    reads keys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < keys.size() and b < keys.size() and a < b) ==>
+          keys[a] < keys[b]));
+    requires i < keys.size();
+    requires j < keys.size();
+    requires i != j;
+    ensures keys[i] != keys[j];
+  {
+    if (i < j) {
+      projectedSortedKeysDistinctForward(keys, i, j);
+      assert keys[i] != keys[j];
+    } else {
+      assert j < i;
+      projectedSortedKeysDistinctForward(keys, j, i);
+      assert keys[j] != keys[i];
+      assert keys[i] != keys[j];
+    }
+  };
+
+  public lemma projectedBasketEntryNonzero(
+    nodeKeys : [ProjectionKey],
+    amounts : [Nat],
+    i : Nat
+  ) : ()
+    reads nodeKeys, amounts
+    requires nodeKeys.size() == amounts.size();
+    requires forall<Nat>(pure func (j : Nat) : Bool =
+      j < amounts.size() ==> amounts[j] > 0);
+    requires i < nodeKeys.size();
+    ensures amounts[i] > 0;
+  {
+    assert i < amounts.size();
+    projectedAmountNonzero(amounts, i);
+  };
+
+  public lemma projectedBasketNodesDistinct(
+    nodeKeys : [ProjectionKey],
+    amounts : [Nat],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads nodeKeys, amounts
+    requires nodeKeys.size() == amounts.size();
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < nodeKeys.size() and b < nodeKeys.size() and a < b) ==>
+          nodeKeys[a] < nodeKeys[b]));
+    requires i < nodeKeys.size();
+    requires j < nodeKeys.size();
+    requires i != j;
+    ensures nodeKeys[i] != nodeKeys[j];
+  {
+    projectedSortedKeysDistinct(nodeKeys, i, j);
+  };
+
+  public lemma projectedDiscoveryNodesDistinct(nodeKeys : [ProjectionKey], i : Nat, j : Nat) : ()
+    reads nodeKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < nodeKeys.size() and b < nodeKeys.size() and a < b) ==>
+          nodeKeys[a] < nodeKeys[b]));
+    requires i < nodeKeys.size();
+    requires j < nodeKeys.size();
+    requires i != j;
+    ensures nodeKeys[i] != nodeKeys[j];
+  {
+    projectedSortedKeysDistinct(nodeKeys, i, j);
+  };
+
+  public lemma projectedDiscoveryEdgesDistinct(edgeKeys : [ProjectionKey], i : Nat, j : Nat) : ()
+    reads edgeKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < edgeKeys.size() and b < edgeKeys.size() and a < b) ==>
+          edgeKeys[a] < edgeKeys[b]));
+    requires i < edgeKeys.size();
+    requires j < edgeKeys.size();
+    requires i != j;
+    ensures edgeKeys[i] != edgeKeys[j];
+  {
+    projectedSortedKeysDistinct(edgeKeys, i, j);
+  };
+
+  public lemma projectedPagesDisjoint(
+    leftKeys : [ProjectionKey],
+    rightKeys : [ProjectionKey],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads leftKeys, rightKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < leftKeys.size() and b < rightKeys.size()) ==>
+          leftKeys[a] < rightKeys[b]));
+    requires i < leftKeys.size();
+    requires j < rightKeys.size();
+    ensures leftKeys[i] != rightKeys[j];
+  {
+    assert leftKeys[i] < rightKeys[j];
+  };
+
+  public lemma projectedSortedPagesDisjointByBoundary(
+    leftKeys : [ProjectionKey],
+    rightKeys : [ProjectionKey],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads leftKeys, rightKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < leftKeys.size() and b < leftKeys.size() and a < b) ==>
+          leftKeys[a] < leftKeys[b]));
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < rightKeys.size() and b < rightKeys.size() and a < b) ==>
+          rightKeys[a] < rightKeys[b]));
+    requires leftKeys.size() > 0;
+    requires rightKeys.size() > 0;
+    requires i < leftKeys.size();
+    requires j < rightKeys.size();
+    requires leftKeys[leftKeys.size() - 1] < rightKeys[0];
+    ensures leftKeys[i] != rightKeys[j];
+  {
+    let last = leftKeys.size() - 1;
+    if (i < last) {
+      projectedSortedKeysDistinctForward(leftKeys, i, last);
+      assert leftKeys[i] < leftKeys[last];
+    } else {
+      assert i == last;
+      assert leftKeys[i] == leftKeys[last];
+    };
+    if (j == 0) {
+      assert rightKeys[j] == rightKeys[0];
+    } else {
+      assert 0 < j;
+      projectedSortedKeysDistinctForward(rightKeys, 0, j);
+      assert rightKeys[0] < rightKeys[j];
+    };
+    assert leftKeys[i] < rightKeys[j];
+  };
+
+  public pure trusted func basketAmount(entries : [Types.BasketEntry], node : Types.NodeId) : Nat
+    requires true;
+    ensures true;
+  {
+    var total = 0;
+    for (entry in entries.values()) {
+      if (entry.node == node) {
+        total += entry.amount
+      };
+    };
+    total
+  };
+
+  public pure trusted func basketContains(
+    available : [Types.BasketEntry],
+    required : [Types.BasketEntry]
+  ) : Bool
+    requires true;
+    ensures true;
+  {
+    for (needed in required.values()) {
+      if (basketAmount(available, needed.node) < needed.amount) {
+        return false
+      };
+    };
+    true
+  };
+
+  public pure func guardDeadlineAccepts(guard : Types.Guard, now : Int) : Bool
+    requires true;
+  {
+    switch (guard.deadline) {
+      case null { true };
+      case (?deadline) { now <= deadline }
+    }
+  };
+
+  public pure func guardAccepts(guard : Types.Guard, receipt : Types.Receipt, now : Int) : Bool
+    requires true;
+    ensures result == (
+      guardDeadlineAccepts(guard, now) and
+        basketContains(receipt.output, guard.minReceive) and
+        (guard.maxSpend.size() == 0 or basketContains(guard.maxSpend, receipt.input)) and
+        (guard.maxFee.size() == 0 or basketContains(guard.maxFee, receipt.fees))
+    );
+  {
+    guardDeadlineAccepts(guard, now) and
+      basketContains(receipt.output, guard.minReceive) and
+      (guard.maxSpend.size() == 0 or basketContains(guard.maxSpend, receipt.input)) and
+      (guard.maxFee.size() == 0 or basketContains(guard.maxFee, receipt.fees))
+  };
+
+  public lemma guardAcceptsImpliesDeadline(
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int
+  ) : ()
+    requires guardAccepts(guard, receipt, now);
+    ensures guardDeadlineAccepts(guard, now);
+  {};
+
+  public lemma guardAcceptsImpliesMinReceive(
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int
+  ) : ()
+    requires guardAccepts(guard, receipt, now);
+    ensures basketContains(receipt.output, guard.minReceive);
+  {};
+
+  public lemma guardAcceptsImpliesMaxSpend(
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int
+  ) : ()
+    requires guardAccepts(guard, receipt, now);
+    ensures guard.maxSpend.size() == 0 or basketContains(guard.maxSpend, receipt.input);
+  {};
+
+  public lemma guardAcceptsImpliesMaxFee(
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int
+  ) : ()
+    requires guardAccepts(guard, receipt, now);
+    ensures guard.maxFee.size() == 0 or basketContains(guard.maxFee, receipt.fees);
+  {};
+
+  public pure trusted func quoteHasPositiveFlow(q : Types.Quote) : Bool
+    requires true;
+    ensures true;
+  {
+    for (entry in q.input.values()) {
+      if (entry.amount > 0) { return true }
+    };
+    for (entry in q.output.values()) {
+      if (entry.amount > 0) { return true }
+    };
+    for (effect in q.positionInputs.values()) {
+      if (effect.amount > 0) { return true }
+    };
+    for (effect in q.positionOutputs.values()) {
+      if (effect.amount > 0) { return true }
+    };
+    false
+  };
+
+  public pure func quoteBindsRequest(q : Types.Quote, request : Types.QuoteRequest) : Bool
+    requires true;
+    ensures result == (q.account == request.account and sameEdgeId(q.edgeId, request.edgeId));
+  {
+    q.account == request.account and sameEdgeId(q.edgeId, request.edgeId)
+  };
+
+  public pure func quoteAccepted(q : Types.Quote, request : Types.QuoteRequest, now : Int) : Bool
+    requires true;
+  {
+    request.intent.amount > 0 and
+      quoteHasPositiveFlow(q) and
+      quoteBindsRequest(q, request) and
+      quoteLive(q, now)
+  };
+
+  // Public postcondition shape for successful quote responses. The caller
+  // authorization fact is supplied by the actor's local registration map.
+  public pure func quoteReturned(
+    authorized : Bool,
+    request : Types.QuoteRequest,
+    q : Types.Quote
+  ) : Bool
+    requires true;
+  {
+    authorized and
+      request.intent.amount > 0 and
+      quoteHasPositiveFlow(q) and
+      quoteBindsRequest(q, request)
+  };
+
+  public lemma quoteReturnedImpliesAuthorized(
+    authorized : Bool,
+    request : Types.QuoteRequest,
+    q : Types.Quote
+  ) : ()
+    requires quoteReturned(authorized, request, q);
+    ensures authorized;
+  {};
+
+  public lemma quoteReturnedImpliesPositiveAmount(
+    authorized : Bool,
+    request : Types.QuoteRequest,
+    q : Types.Quote
+  ) : ()
+    requires quoteReturned(authorized, request, q);
+    ensures request.intent.amount > 0;
+  {};
+
+  public lemma quoteReturnedImpliesPositiveFlow(
+    authorized : Bool,
+    request : Types.QuoteRequest,
+    q : Types.Quote
+  ) : ()
+    requires quoteReturned(authorized, request, q);
+    ensures quoteHasPositiveFlow(q);
+  {};
+
+  public lemma quoteReturnedImpliesRequestBinding(
+    authorized : Bool,
+    request : Types.QuoteRequest,
+    q : Types.Quote
+  ) : ()
+    requires quoteReturned(authorized, request, q);
+    ensures quoteBindsRequest(q, request);
+  {};
+
+  public pure func executable(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : Bool
+    requires true;
+  {
+    authorized and
+      quoteHasPositiveFlow(q) and
+      quoteLive(q, now) and
+      edgeStatusLive(status) and
+      receiptBindsQuote(q, receipt) and
+      receipt.executedAt == now and
+      guardAccepts(guard, receipt, now)
+  };
+
+  // Public postcondition shape for successful execute receipts. This is the
+  // part clients care about: the receipt is bound to the quote and accepted by
+  // the caller's guard at the receipt execution time.
+  public pure func receiptAccepted(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : Bool
+    requires true;
+  {
+    authorized and
+      quoteHasPositiveFlow(q) and
+      quoteLive(q, receipt.executedAt) and
+      receiptBindsQuote(q, receipt) and
+      guardAccepts(guard, receipt, receipt.executedAt)
+  };
+
+  public lemma receiptAcceptedImpliesAuthorized(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures authorized;
+  {};
+
+  public lemma receiptAcceptedImpliesPositiveFlow(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures quoteHasPositiveFlow(q);
+  {};
+
+  public lemma receiptAcceptedImpliesLive(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures quoteLive(q, receipt.executedAt);
+  {};
+
+  public lemma receiptAcceptedImpliesQuoteBinding(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures receiptBindsQuote(q, receipt);
+  {};
+
+  public lemma receiptAcceptedImpliesGuardAccepts(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures guardAccepts(guard, receipt, receipt.executedAt);
+  {};
+
+  public lemma receiptAcceptedImpliesMinReceive(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures basketContains(receipt.output, guard.minReceive);
+  {};
+
+  public lemma receiptAcceptedImpliesMaxSpend(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures guard.maxSpend.size() == 0 or basketContains(guard.maxSpend, receipt.input);
+  {};
+
+  public lemma receiptAcceptedImpliesMaxFee(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures guard.maxFee.size() == 0 or basketContains(guard.maxFee, receipt.fees);
+  {};
+
+  public lemma receiptAcceptedImpliesDeadline(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires receiptAccepted(authorized, q, guard, receipt);
+    ensures guardDeadlineAccepts(guard, receipt.executedAt);
+  {};
+
+  public lemma executableImpliesReceiptAccepted(
+    authorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ()
+    requires executable(authorized, q, guard, receipt, now, status);
+    ensures receiptAccepted(authorized, q, guard, receipt);
+  {};
+
+  // Shared execute preflight. Protocol examples call this after building a
+  // receipt preview and before committing local state.
+  public func checkExecute(
+    authorized : Bool,
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ?Types.ExecuteError
+    requires true;
+    ensures switch (result) {
+      case null { executable(authorized, q, guard, receipt, now, status) };
+      case (?_) { not executable(authorized, q, guard, receipt, now, status) }
+    };
+  {
+    if (not authorized) {
+      return ?#accountNotAuthorized({
+        caller = caller;
+        account = q.account
+      })
+    };
+    if (not quoteHasPositiveFlow(q)) {
+      return ?#invalidAmount
+    };
+    if (not quoteLive(q, now)) {
+      return ?#expiredQuote
+    };
+    if (not edgeStatusLive(status)) {
+      return ?#edgeNotLive(status)
+    };
+    if (not receiptBindsQuote(q, receipt) or receipt.executedAt != now) {
+      return ?#quoteReceiptMismatch
+    };
+    if (not guardAccepts(guard, receipt, now)) {
+      return ?#guardRejected
+    };
+    null
+  };
+
+  // Helper for protocols whose quote builder already produced a full quote but
+  // still wants generic request binding, amount, and freshness checks.
+  public func quoteResult(
+    q : Types.Quote,
+    request : Types.QuoteRequest,
+    now : Int
+  ) : Types.Result<Types.Quote, Types.ExecuteError>
+    requires true;
+    ensures switch (result) {
+      case (#ok quote) {
+        quote == q and quoteAccepted(quote, request, now)
+      };
+      case (#err(_)) { not quoteAccepted(q, request, now) }
+    };
+  {
+    if (request.intent.amount == 0 or not quoteHasPositiveFlow(q)) {
+      #err(#invalidAmount)
+    } else if (not quoteBindsRequest(q, request)) {
+      #err(#quoteReceiptMismatch)
+    } else if (not quoteLive(q, now)) {
+      #err(#expiredQuote)
+    } else {
+      #ok(q)
+    }
+  };
+
+  public func quoteResultForAuthorization(
+    authorized : Bool,
+    caller : Principal,
+    q : Types.Quote,
+    request : Types.QuoteRequest,
+    now : Int
+  ) : Types.Result<Types.Quote, Types.ExecuteError>
+    requires true;
+    ensures switch (result) {
+      case (#ok quote) {
+        quote == q and quoteReturned(authorized, request, quote) and quoteLive(quote, now)
+      };
+      case (#err(_)) {
+        not authorized or not quoteAccepted(q, request, now)
+      }
+    };
+  {
+    if (not authorized) {
+      #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    } else {
+      quoteResult(q, request, now)
+    }
+  };
+
+  public pure func quoteAuthorizedForCaller(caller : Principal, q : Types.Quote) : Bool
+    requires true;
+    ensures result == accountBelongsToWallet(q.account, caller);
+  {
+    accountBelongsToWallet(q.account, caller)
+  };
+
+  public pure func requestAuthorizedForCaller(
+    caller : Principal,
+    request : Types.QuoteRequest
+  ) : Bool
+    requires true;
+    ensures result == accountBelongsToWallet(request.account, caller);
+  {
+    accountBelongsToWallet(request.account, caller)
+  };
+
+  public pure func executableForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : Bool
+    requires true;
+    ensures result == executable(quoteAuthorizedForCaller(caller, q), q, guard, receipt, now, status);
+  {
+    executable(quoteAuthorizedForCaller(caller, q), q, guard, receipt, now, status)
+  };
+
+  public func quoteResultForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    request : Types.QuoteRequest,
+    now : Int
+  ) : Types.Result<Types.Quote, Types.ExecuteError>
+    requires true;
+    ensures switch (result) {
+      case (#ok quote) {
+        quote == q and
+          quoteReturned(requestAuthorizedForCaller(caller, request), request, quote) and
+          quoteLive(quote, now)
+      };
+      case (#err(_)) {
+        not requestAuthorizedForCaller(caller, request) or
+          not quoteAccepted(q, request, now)
+      }
+    };
+  {
+    if (not accountBelongsToWallet(request.account, caller)) {
+      #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    } else if (request.intent.amount == 0 or not quoteHasPositiveFlow(q)) {
+      #err(#invalidAmount)
+    } else if (not quoteBindsRequest(q, request)) {
+      #err(#quoteReceiptMismatch)
+    } else if (not quoteLive(q, now)) {
+      #err(#expiredQuote)
+    } else {
+      #ok(q)
+    }
+  };
+
+  public func checkExecuteForCaller(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ?Types.ExecuteError
+    requires true;
+    ensures switch (result) {
+      case null { executableForCaller(caller, q, guard, receipt, now, status) };
+      case (?_) { not executableForCaller(caller, q, guard, receipt, now, status) }
+    };
+  {
+    if (not accountBelongsToWallet(q.account, caller)) {
+      return ?#accountNotAuthorized({
+        caller = caller;
+        account = q.account
+      })
+    };
+    if (not quoteHasPositiveFlow(q)) {
+      return ?#invalidAmount
+    };
+    if (not quoteLive(q, now)) {
+      return ?#expiredQuote
+    };
+    if (not edgeStatusLive(status)) {
+      return ?#edgeNotLive(status)
+    };
+    if (not receiptBindsQuote(q, receipt) or receipt.executedAt != now) {
+      return ?#quoteReceiptMismatch
+    };
+    if (not guardAccepts(guard, receipt, now)) {
+      return ?#guardRejected
+    };
+    null
+  };
+
+  public lemma executableForCallerImpliesReceiptAccepted(
+    caller : Principal,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt,
+    now : Int,
+    status : Types.DiscoveryStatus
+  ) : ()
+    requires executableForCaller(caller, q, guard, receipt, now, status);
+    ensures receiptAccepted(quoteAuthorizedForCaller(caller, q), q, guard, receipt);
+  {};
+
+  public func emptyGuard() : Types.Guard
+    requires true;
+  {
+    {
+      minReceive = [];
+      maxSpend = [];
+      deadline = null;
+      maxFee = [];
+      maxPriceImpact = null;
+      minShares = null;
+      maxDebt = null;
+      minHealth = null;
+      extension = null
+    }
+  };
+}

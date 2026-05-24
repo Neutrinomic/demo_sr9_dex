@@ -1,0 +1,179 @@
+import Blob "mo:core/Blob";
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import Runtime "mo:core/Runtime";
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+import SPI102 "mo:spi/102/Types";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public let unstakeDelayNs : Int = 604_800_000_000_000;
+
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func ledgerNode(ledger : Principal) : SPI101.NodeId
+    requires true;
+  {
+    #ledger(ledger)
+  };
+
+  public pure trusted func activeStakeNode() : SPI101.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([2]))
+  };
+
+  public pure trusted func pendingUnstakeNode() : SPI101.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([3]))
+  };
+
+  public pure trusted func pendingWithdrawalNode() : SPI101.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([4]))
+  };
+
+  public pure func scoped(namespace : Text, id : Nat) : SPI102.ScopedId
+    requires true;
+  {
+    {
+      scope = Runtime.selfId();
+      namespace = namespace;
+      id = id
+    }
+  };
+
+  public pure func stakeEdge() : SPI102.EdgeId
+    requires true;
+  {
+    scoped("stake", 0)
+  };
+
+  public pure func requestUnstakeEdge() : SPI102.EdgeId
+    requires true;
+  {
+    scoped("request-unstake", 1)
+  };
+
+  public pure func cancelUnstakeEdge() : SPI102.EdgeId
+    requires true;
+  {
+    scoped("cancel-unstake", 2)
+  };
+
+  public pure func claimUnstakedEdge() : SPI102.EdgeId
+    requires true;
+  {
+    scoped("claim-unstaked", 3)
+  };
+
+  public func nodeShape(nodeId : SPI102.NodeId, form : SPI102.NodeForm, name : Text, displayAsset : ?SPI102.NodeId) : SPI102.NodeShape
+    requires true;
+  {
+    {
+      nodeId = nodeId;
+      form = form;
+      displayAsset = displayAsset;
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  public func edgeShape(edgeId : SPI102.EdgeId, inputs : [SPI102.NodeId], outputs : [SPI102.NodeId], name : Text) : SPI102.EdgeShape
+    requires true;
+  {
+    {
+      edgeId = edgeId;
+      inputNodes = inputs;
+      outputNodes = outputs;
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  public pure trusted func discoveryEdge(shape : SPI102.EdgeShape, status : SPI102.DiscoveryStatus) : SPI102.DiscoveryEdge
+    requires true;
+    ensures true;
+  {
+    { edge = shape; status = status }
+  };
+
+  public func fungibleEntry(
+    node : SPI101.NodeId,
+    amount : Nat,
+    status : SPI101.HoldingStatus,
+    displayAsset : ?SPI101.NodeId,
+    name : Text
+  ) : SPI101.WalletEntry
+    requires true;
+  {
+    {
+      node = node;
+      holding = #fungible({
+        amount = amount;
+        meta = ()
+      });
+      status = status;
+      displayAsset = displayAsset;
+      displayLabel = ?name
+    }
+  };
+
+  public pure func ledgerReject() : SPI103.LedgerReject
+    requires true;
+    ensures result.message == "ledger call rejected";
+  {
+    { message = "ledger call rejected" }
+  };
+
+  public func depositTransferFromArgs(request : SPI103.IcrcDepositRequest) : ICRCLedger.TransferFromArgs
+    requires true;
+    ensures result.to.owner == Runtime.selfId();
+    ensures result.to.subaccount == null;
+    ensures result.from == request.from;
+    ensures result.spender_subaccount == null;
+    ensures result.fee == null;
+    ensures result.memo == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == request.amount;
+  {
+    {
+      to = { owner = Runtime.selfId(); subaccount = null };
+      fee = null;
+      spender_subaccount = null;
+      from = request.from;
+      memo = null;
+      created_at_time = null;
+      amount = request.amount
+    }
+  };
+
+  public pure func withdrawTransferArgs(request : SPI103.IcrcWithdrawRequest, fee : Nat) : ICRCLedger.TransferArg
+    requires true;
+    ensures result.to == request.to;
+    ensures result.fee == ?fee;
+    ensures result.memo == null;
+    ensures result.from_subaccount == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == request.amount;
+  {
+    {
+      to = request.to;
+      fee = ?fee;
+      memo = null;
+      from_subaccount = null;
+      created_at_time = null;
+      amount = request.amount
+    }
+  };
+}

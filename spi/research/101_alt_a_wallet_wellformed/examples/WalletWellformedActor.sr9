@@ -1,0 +1,86 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/101_alt_a_wallet_wellformed/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+
+persistent actor class WalletWellformedActor(ledger : Principal) {
+  public type Result<Ok, Err> = SPI101.Result<Ok, Err>;
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountAuthorized(caller, account);
+  {
+    Kernel.accountAuthorized(caller, account)
+  };
+
+  private pure func taggedLocalNode(scope : Principal, tag : Nat) : SPI101.NodeId
+    requires tag <= 4_294_967_295;
+  {
+    #local(Blob.appendNat32BEByte(Principal.toBlob(scope), tag, 0))
+  };
+
+  private pure func lpNode(scope : Principal) : SPI101.NodeId
+    requires true;
+  {
+    taggedLocalNode(scope, 1)
+  };
+
+  private pure func activeStakeNode(scope : Principal) : SPI101.NodeId
+    requires true;
+  {
+    taggedLocalNode(scope, 2)
+  };
+
+  private pure func pendingStakeNode(scope : Principal) : SPI101.NodeId
+    requires true;
+  {
+    taggedLocalNode(scope, 3)
+  };
+
+  private func walletEntries() : [SPI101.WalletEntry]
+    reads ledger
+    requires true;
+  {
+    [
+      SPI101.externalLedgerWalletEntry(ledger, 100, ?"Token"),
+      SPI101.fungibleWalletEntry(lpNode(ledger), 25, ?"LP share"),
+      SPI101.nonfungibleWalletEntry(activeStakeNode(ledger), 7, #available, ?#ledger(ledger), ?"Active stake"),
+      SPI101.nonfungibleWalletEntry(pendingStakeNode(ledger), 8, #locked({ unlockAt = ?123 }), ?#ledger(ledger), ?"Pending unstake")
+    ]
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : SPI101.WalletRequest
+  ) : async Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads ledger
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.walletReturned(caller, request, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    assert Kernel.accountAuthorized(caller, request.account);
+    let receipt : SPI101.WalletReceipt = {
+      account = request.account;
+      entries = walletEntries();
+      nextCursor = null;
+      witness = null
+    };
+    assert Kernel.walletReceiptBindsAccount(request, receipt);
+    assert Kernel.walletReceiptWellFormed(request, receipt);
+    assert Kernel.walletReturned(caller, request, receipt);
+    #ok(receipt)
+  }
+}

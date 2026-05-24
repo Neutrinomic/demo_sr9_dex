@@ -1,430 +1,324 @@
-import Dao "./lib/Dao";
+import AccountBook "./lib/AccountBook";
+import DaoUtils "./lib/DaoUtils";
 import ICRCLedger "mo:core/pattern/ICRCLedger";
-import NatCore "mo:core/Nat";
-import Prim "mo:⛔";
-import Runtime "mo:core/Runtime";
-import SPI101 "mo:spi/101/DepositWithdrawBalance";
-import Text "mo:core/Text";
+import Kernel102 "mo:spi/102/Kernel";
+import Principal "mo:core/Principal";
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+import SPI102 "mo:spi/102/Types";
+import SPI103 "mo:spi/103/ICRCBridge";
 import Time "mo:core/Time";
-import Types "./lib/Types";
-import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
-import WithdrawalOps "./lib/WithdrawalOps";
 
 persistent actor class DaoActorDemo(
   governanceLedger : Principal,
-  initialQuorumVotes : Nat,
-  initialProposalThreshold : Nat
+  _initialQuorumVotes : Nat,
+  _initialProposalThreshold : Nat
 ) {
-  public type Result<Ok, Err> = Types.Result<Ok, Err>;
-  public type Config = Types.Config;
-  public type ConfigAction = Types.ConfigAction;
-  public type DaoTotals = Types.DaoTotals;
-  public type Proposal = Types.Proposal;
-  public type ProposalWindow = Types.ProposalWindow;
-  public type PendingWithdrawal = Types.PendingWithdrawal;
-  public type StakeInfo = Types.StakeInfo;
-  public type VoteChoice = Types.VoteChoice;
-  public type VoteInfo = Types.VoteInfo;
-  public type DepositReceipt = Types.DepositReceipt;
-  public type WithdrawReceipt = Types.WithdrawReceipt;
-  public type StakeReceipt = Types.StakeReceipt;
-  public type RequestUnstakeReceipt = Types.RequestUnstakeReceipt;
-  public type ClaimUnstakeReceipt = Types.ClaimUnstakeReceipt;
-  public type ProposalReceipt = Types.ProposalReceipt;
-  public type VoteReceipt = Types.VoteReceipt;
-  public type CloseReceipt = Types.CloseReceipt;
-  public type ExecuteReceipt = Types.ExecuteReceipt;
-  public type DepositError = Types.DepositError;
-  public type WithdrawError = Types.WithdrawError;
-  public type StakeError = Types.StakeError;
-  public type UnstakeError = Types.UnstakeError;
-  public type ProposalError = Types.ProposalError;
-  public type VoteError = Types.VoteError;
-  public type CloseError = Types.CloseError;
-  public type ExecuteError = Types.ExecuteError;
-  public type SPI101DepositRequest = SPI101.DepositRequest;
-  public type SPI101DepositReceipt = SPI101.DepositReceipt;
-  public type SPI101DepositError = SPI101.DepositError;
-  public type SPI101WithdrawRequest = SPI101.WithdrawRequest;
-  public type SPI101WithdrawReceipt = SPI101.WithdrawReceipt;
-  public type SPI101WithdrawError = SPI101.WithdrawError;
-  public type SPI101BalanceRequest = SPI101.BalanceRequest;
-  public type SPI101BalanceReceipt = SPI101.BalanceReceipt;
+  public type Result<Ok, Err> = SPI102.Result<Ok, Err>;
+  public type WalletRequest = SPI101.WalletRequest;
+  public type WalletReceipt = SPI101.WalletReceipt;
+  public type WalletError = SPI101.WalletError;
+  public type DiscoverRequest = SPI102.DiscoverRequest;
+  public type QuoteRequest = SPI102.QuoteRequest;
+  public type ExecuteRequest = SPI102.ExecuteRequest;
+  public type IcrcDepositRequest = SPI103.IcrcDepositRequest;
+  public type IcrcDepositReceipt = SPI103.IcrcDepositReceipt;
+  public type IcrcDepositError = SPI103.IcrcDepositError;
+  public type IcrcWithdrawRequest = SPI103.IcrcWithdrawRequest;
+  public type IcrcWithdrawReceipt = SPI103.IcrcWithdrawReceipt;
+  public type IcrcWithdrawError = SPI103.IcrcWithdrawError;
 
-  var dao : Dao.State = Dao.init(
-    governanceLedger,
-    initialQuorumVotes,
-    initialProposalThreshold
-  );
-  var withdrawOps : WithdrawalOps.State = WithdrawalOps.init();
+  var liquid : AccountBook.NatBook = AccountBook.emptyNat();
+  var active : AccountBook.NatBook = AccountBook.emptyNat();
+  var pendingUnstake : AccountBook.NatBook = AccountBook.emptyNat();
+  var unlockTimes : AccountBook.IntBook = AccountBook.emptyInt();
+  var pendingWithdrawAmount : AccountBook.NatBook = AccountBook.emptyNat();
+  var pendingWithdrawFee : AccountBook.NatBook = AccountBook.emptyNat();
+  var pendingWithdrawDebit : AccountBook.NatBook = AccountBook.emptyNat();
 
-  invariant WithdrawalOps.valid(withdrawOps);
+  invariant AccountBook.orderedNat(liquid);
+  invariant AccountBook.orderedNat(active);
+  invariant AccountBook.orderedNat(pendingUnstake);
+  invariant AccountBook.orderedInt(unlockTimes);
+  invariant AccountBook.orderedNat(pendingWithdrawAmount);
+  invariant AccountBook.orderedNat(pendingWithdrawFee);
+  invariant AccountBook.orderedNat(pendingWithdrawDebit);
 
-  private let NAT64_MAX : Nat = 18_446_744_073_709_551_615;
-  private let NAT64_MAX_VALUE : Nat64 = 18_446_744_073_709_551_615;
-
-  private pure func ledgerReject() : Types.LedgerReject {
-    { message = "ledger call rejected" }
-  };
-
-  private func ledgerCreatedAtTime() : Nat64
-    reads NAT64_MAX_VALUE
+  private pure func authorized(caller : Principal, account : SPI100.Account) : Bool
     requires true;
-    ensures result <= NAT64_MAX_VALUE;
+    ensures result == DaoUtils.accountBelongsToWallet(account, caller);
   {
-    Prim.time()
+    DaoUtils.accountBelongsToWallet(account, caller)
   };
 
-  private func ledgerCreatedAtTimeNat(time : Nat64) : Nat
-    reads NAT64_MAX, NAT64_MAX_VALUE
-    requires time <= NAT64_MAX_VALUE;
-    ensures result <= NAT64_MAX;
+  private pure func ledgerNode(ledger : Principal) : SPI102.NodeId
+    requires true;
   {
-    Prim.nat64ToNat(time)
+    DaoUtils.ledgerNode(ledger)
   };
 
-  private func natToLedgerCreatedAtTime(time : Nat) : Nat64
-    reads NAT64_MAX, NAT64_MAX_VALUE
-    requires time <= NAT64_MAX;
-    ensures result <= NAT64_MAX_VALUE;
+  private pure func knownEdge(edgeId : SPI102.EdgeId) : Bool
+    requires true;
   {
-    Prim.natToNat64(time)
+    Kernel102.sameEdgeId(edgeId, DaoUtils.stakeEdge()) or
+      Kernel102.sameEdgeId(edgeId, DaoUtils.requestUnstakeEdge()) or
+      Kernel102.sameEdgeId(edgeId, DaoUtils.cancelUnstakeEdge()) or
+      Kernel102.sameEdgeId(edgeId, DaoUtils.claimUnstakedEdge())
   };
 
-  private func operationMemo(kind : Text, operationId : Nat) : Blob
+  private func statusFor(account : SPI100.Account, edgeId : SPI102.EdgeId, amount : Nat, now : Int) : SPI102.DiscoveryStatus
+    reads liquid, active, pendingUnstake, unlockTimes
+  {
+    if (Kernel102.sameEdgeId(edgeId, DaoUtils.stakeEdge())) {
+      let balance = AccountBook.nat(liquid, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.requestUnstakeEdge())) {
+      let balance = AccountBook.nat(active, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.cancelUnstakeEdge())) {
+      let balance = AccountBook.nat(pendingUnstake, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.claimUnstakedEdge())) {
+      let balance = AccountBook.nat(pendingUnstake, account);
+      let unlockAt = AccountBook.int(unlockTimes, account);
+      if (balance == 0 or (amount > 0 and balance < amount)) {
+        #insufficientInput
+      } else if (now < unlockAt) {
+        #notMature({ unlockAt = unlockAt })
+      } else {
+        #live
+      }
+    } else {
+      #protocolSpecific("unknown-edge")
+    }
+  };
+
+  private func discoveryStatus(caller : Principal, account : SPI100.Account, edgeId : SPI102.EdgeId, now : Int) : SPI102.DiscoveryStatus
+    reads liquid, active, pendingUnstake, unlockTimes
+  {
+    if (not authorized(caller, account)) {
+      #unauthorized
+    } else {
+      statusFor(account, edgeId, 0, now)
+    }
+  };
+
+  private func quoteBaskets(
+    account : SPI100.Account,
+    edgeId : SPI102.EdgeId,
+    inputNode : SPI102.NodeId,
+    outputNode : SPI102.NodeId,
+    amount : Nat,
+    now : Int
+  ) : SPI102.Quote
+    reads unlockTimes
+  {
+    let requestedUnlock = now + DaoUtils.unstakeDelayNs;
+    let unlock = if (Kernel102.sameEdgeId(edgeId, DaoUtils.requestUnstakeEdge())) { ?requestedUnlock } else { null };
+    let existingUnlock = AccountBook.int(unlockTimes, account);
+    let inputIsLedger = Kernel102.sameEdgeId(edgeId, DaoUtils.stakeEdge());
+    let outputIsLedger = Kernel102.sameEdgeId(edgeId, DaoUtils.claimUnstakedEdge());
+    let inputIsPending = Kernel102.sameEdgeId(edgeId, DaoUtils.cancelUnstakeEdge()) or
+      Kernel102.sameEdgeId(edgeId, DaoUtils.claimUnstakedEdge());
+    {
+      account = account;
+      edgeId = edgeId;
+      input = [{ node = inputNode; amount = amount }];
+      output = [{ node = outputNode; amount = amount }];
+      positionInputs = if (inputIsLedger) { [] } else {
+        [{ node = inputNode; positionId = ?0; amount = amount; unlockAt = if (inputIsPending) { ?existingUnlock } else { null }; metadata = null }]
+      };
+      positionOutputs = if (outputIsLedger) { [] } else {
+        [{ node = outputNode; positionId = ?0; amount = amount; unlockAt = unlock; metadata = null }]
+      };
+      fees = [];
+      expiresAt = ?(now + 300_000_000_000);
+      preconditions = null;
+      witness = null
+    }
+  };
+
+  private func quoteFor(account : SPI100.Account, edgeId : SPI102.EdgeId, amount : Nat, now : Int) : SPI102.Quote
+    reads governanceLedger, unlockTimes
+  {
+    if (Kernel102.sameEdgeId(edgeId, DaoUtils.stakeEdge())) {
+      quoteBaskets(account, edgeId, ledgerNode(governanceLedger), DaoUtils.activeStakeNode(), amount, now)
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.requestUnstakeEdge())) {
+      quoteBaskets(account, edgeId, DaoUtils.activeStakeNode(), DaoUtils.pendingUnstakeNode(), amount, now)
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.cancelUnstakeEdge())) {
+      quoteBaskets(account, edgeId, DaoUtils.pendingUnstakeNode(), DaoUtils.activeStakeNode(), amount, now)
+    } else {
+      quoteBaskets(account, edgeId, DaoUtils.pendingUnstakeNode(), ledgerNode(governanceLedger), amount, now)
+    }
+  };
+
+  private pure trusted func quoteAmount(q : SPI102.Quote) : Nat
     requires true;
     ensures true;
   {
-    Text.encodeUtf8("dao:" # kind # ":" # NatCore.toText(operationId))
+    if (q.input.size() == 0) { 0 } else { q.input[0].amount }
   };
 
-  private pure func subjectAuthError(
-    caller : Principal,
-    subject : Principal
-  ) : {
-    caller : Principal;
-    subject : Principal
-  }
+  private trusted func receiptFor(q : SPI102.Quote, amount : Nat, now : Int) : SPI102.Receipt
+    reads governanceLedger, pendingUnstake, unlockTimes
     requires true;
-    ensures result.caller == caller;
-    ensures result.subject == subject;
+    ensures true;
   {
-    { caller = caller; subject = subject }
-  };
-
-  private func depositTransferFromArgs(
-    from : ICRCLedger.Account,
-    amount : Nat,
-    operationId : Nat,
-    createdAtTime : Nat64
-  ) : ICRCLedger.TransferFromArgs
-    requires true;
-    ensures result.to.owner == Runtime.selfId();
-    ensures result.to.subaccount == null;
-    ensures result.from.owner == from.owner;
-    ensures result.from.subaccount == from.subaccount;
-    ensures result.spender_subaccount == null;
-    ensures result.fee == null;
-    ensures switch (result.memo) { case (?_) { true }; case null { false } };
-    ensures result.created_at_time == ?createdAtTime;
-    ensures result.amount == amount;
-  {
+    let refreshed = quoteFor(q.account, q.edgeId, amount, now);
+    let existingUnlock = AccountBook.int(unlockTimes, q.account);
+    let remaining : [SPI102.PositionEffect] = if (
+      (Kernel102.sameEdgeId(q.edgeId, DaoUtils.cancelUnstakeEdge()) or Kernel102.sameEdgeId(q.edgeId, DaoUtils.claimUnstakedEdge())) and
+      AccountBook.nat(pendingUnstake, q.account) >= amount
+    ) {
+      [{ node = DaoUtils.pendingUnstakeNode(); positionId = ?0; amount = AccountBook.nat(pendingUnstake, q.account) - amount; unlockAt = ?existingUnlock; metadata = null }]
+    } else {
+      []
+    };
     {
-      to = { owner = Runtime.selfId(); subaccount = null };
-      fee = null;
-      spender_subaccount = null;
-      from = from;
-      memo = ?operationMemo("deposit", operationId);
-      created_at_time = ?createdAtTime;
-      amount = amount
+      account = q.account;
+      edgeId = q.edgeId;
+      input = refreshed.input;
+      output = refreshed.output;
+      positionInputs = refreshed.positionInputs;
+      positionOutputs = refreshed.positionOutputs;
+      positionRemaining = remaining;
+      fees = [];
+      executedAt = now;
+      witness = q.witness
     }
   };
 
-  private func withdrawTransferArgs(
-    to : ICRCLedger.Account,
-    started : Types.WithdrawStarted
-  ) : ICRCLedger.TransferArg
-    reads NAT64_MAX, NAT64_MAX_VALUE
-    requires started.createdAtTime <= NAT64_MAX;
-    ensures result.to.owner == to.owner;
-    ensures result.to.subaccount == to.subaccount;
-    ensures result.fee == ?started.fee;
-    ensures switch (result.memo) { case (?_) { true }; case null { false } };
-    ensures result.from_subaccount == null;
-    ensures switch (result.created_at_time) { case (?_) { true }; case null { false } };
-    ensures result.amount == started.amount;
+  private func commit(account : SPI100.Account, edgeId : SPI102.EdgeId, amount : Nat, now : Int) : ?SPI102.ExecuteError
+    modifies liquid, active, pendingUnstake, unlockTimes
   {
-    {
-      to = to;
-      fee = ?started.fee;
-      memo = ?operationMemo("withdraw", started.operationId);
-      from_subaccount = null;
-      created_at_time = ?natToLedgerCreatedAtTime(started.createdAtTime);
-      amount = started.amount
+    if (Kernel102.sameEdgeId(edgeId, DaoUtils.stakeEdge())) {
+      switch (AccountBook.debit(liquid, account, amount)) {
+        case null { ?#insufficientInput };
+        case (?next) {
+          liquid := next;
+          active := AccountBook.credit(active, account, amount);
+          null
+        }
+      }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.requestUnstakeEdge())) {
+      switch (AccountBook.debit(active, account, amount)) {
+        case null { ?#insufficientInput };
+        case (?next) {
+          active := next;
+          pendingUnstake := AccountBook.credit(pendingUnstake, account, amount);
+          unlockTimes := AccountBook.setInt(unlockTimes, account, now + DaoUtils.unstakeDelayNs);
+          null
+        }
+      }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.cancelUnstakeEdge())) {
+      switch (AccountBook.debit(pendingUnstake, account, amount)) {
+        case null { ?#insufficientInput };
+        case (?next) {
+          pendingUnstake := next;
+          active := AccountBook.credit(active, account, amount);
+          if (AccountBook.nat(next, account) == 0) {
+            unlockTimes := AccountBook.setInt(unlockTimes, account, 0)
+          };
+          null
+        }
+      }
+    } else if (Kernel102.sameEdgeId(edgeId, DaoUtils.claimUnstakedEdge())) {
+      if (now < AccountBook.int(unlockTimes, account)) {
+        ?#insufficientInput
+      } else {
+        switch (AccountBook.debit(pendingUnstake, account, amount)) {
+          case null { ?#insufficientInput };
+          case (?next) {
+            pendingUnstake := next;
+            liquid := AccountBook.credit(liquid, account, amount);
+            if (AccountBook.nat(next, account) == 0) {
+              unlockTimes := AccountBook.setInt(unlockTimes, account, 0)
+            };
+            null
+          }
+        }
+      }
+    } else {
+      ?#unknownEdge
     }
   };
 
-  private pure func spiDepositReceipt(
-    subject : Principal,
-    from : ICRCLedger.Account,
-    receipt : Types.DepositReceipt
-  ) : SPI101.DepositReceipt
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?SPI100.Account
     requires true;
-    ensures result.subject == subject;
-    ensures result.ledger == receipt.ledger;
-    ensures result.amount == receipt.amount;
-    ensures result.txIndex == receipt.txIndex;
-    ensures result.balanceAfter == receipt.liquidBalance;
   {
-    {
-      ledger = receipt.ledger;
-      from = from;
-      subject = subject;
-      amount = receipt.amount;
-      txIndex = receipt.txIndex;
-      balanceAfter = receipt.liquidBalance
-    }
-  };
-
-  private pure func spiPendingWithdrawal(
-    subject : Principal,
-    ledger : Principal,
-    to : ICRCLedger.Account,
-    pending : Types.PendingWithdrawal
-  ) : SPI101.PendingWithdrawal
-    requires true;
-    ensures result.subject == subject;
-    ensures result.ledger == ledger;
-    ensures result.amount == pending.amount;
-    ensures result.fee == pending.fee;
-    ensures result.debitAmount == pending.debitAmount;
-  {
-    {
-      subject = subject;
-      ledger = ledger;
-      to = to;
-      amount = pending.amount;
-      fee = pending.fee;
-      debitAmount = pending.debitAmount
-    }
-  };
-
-  private pure func spiPendingFromRequest(
-    request : SPI101.WithdrawRequest,
-    fee : Nat
-  ) : SPI101.PendingWithdrawal
-    requires true;
-    ensures result.subject == request.subject;
-    ensures result.ledger == request.ledger;
-    ensures result.amount == request.amount;
-    ensures result.fee == fee;
-    ensures result.debitAmount == request.amount + fee;
-  {
-    {
-      subject = request.subject;
-      ledger = request.ledger;
-      to = request.to;
-      amount = request.amount;
-      fee = fee;
-      debitAmount = request.amount + fee
-    }
-  };
-
-  private pure func spiWithdrawReceipt(
-    subject : Principal,
-    to : ICRCLedger.Account,
-    receipt : Types.WithdrawReceipt
-  ) : SPI101.WithdrawReceipt
-    requires true;
-    ensures result.subject == subject;
-    ensures result.ledger == receipt.ledger;
-    ensures result.amount == receipt.amount;
-    ensures result.fee == receipt.fee;
-    ensures result.debitAmount == receipt.debitAmount;
-    ensures result.txIndex == receipt.txIndex;
-    ensures result.balanceAfter == receipt.liquidBalance;
-  {
-    {
-      ledger = receipt.ledger;
-      to = to;
-      subject = subject;
-      amount = receipt.amount;
-      fee = receipt.fee;
-      debitAmount = receipt.debitAmount;
-      txIndex = receipt.txIndex;
-      balanceAfter = receipt.liquidBalance
-    }
+    SPI100.encode(wallet, id)
   };
 
   public query func governance_ledger() : async Principal
     reads governanceLedger
-    ensures result == governanceLedger;
   {
     governanceLedger
   };
 
-  public query func proposal_config() : async Config
-    reads dao
-    ensures result == Dao.config(dao);
-  {
-    Dao.config(dao)
-  };
-
-  public query func config_version() : async Nat
-    reads dao
-    ensures result == Dao.configVersion(dao);
-  {
-    Dao.configVersion(dao)
-  };
-
-  public query func dao_totals() : async DaoTotals
-    reads dao
-  {
-    Dao.totals(dao)
-  };
-
-  public query func next_proposal_id() : async Nat
-    reads dao
-  {
-    Dao.nextProposalId(dao)
-  };
-
-  public query func max_proposals() : async Nat
-  {
-    Dao.maxProposals()
-  };
-
-  public query func proposal_window() : async ProposalWindow
-    reads dao
-  {
-    Dao.proposalWindow(dao)
-  };
-
-  public query func voting_power(user : Principal) : async Nat
-    reads dao
+  public shared query({ caller }) trusted func spi_102_discover(request : DiscoverRequest) : async SPI102.Discovery
+    reads governanceLedger, liquid, active, pendingUnstake, unlockTimes
+    requires true;
+    ensures true;
   {
     let now = Time.now();
-    Dao.eligibleVotingPower(dao, user, now)
+    {
+      account = request.account;
+      nodes = [
+        DaoUtils.nodeShape(ledgerNode(governanceLedger), #fungible, "Liquid governance balance", null),
+        DaoUtils.nodeShape(DaoUtils.activeStakeNode(), #fungible, "Active stake", ?ledgerNode(governanceLedger)),
+        DaoUtils.nodeShape(DaoUtils.pendingUnstakeNode(), #fungible, "Pending unstake", ?ledgerNode(governanceLedger))
+      ];
+      edges = [
+        DaoUtils.discoveryEdge(DaoUtils.edgeShape(DaoUtils.stakeEdge(), [ledgerNode(governanceLedger)], [DaoUtils.activeStakeNode()], "Stake"), discoveryStatus(caller, request.account, DaoUtils.stakeEdge(), now)),
+        DaoUtils.discoveryEdge(DaoUtils.edgeShape(DaoUtils.requestUnstakeEdge(), [DaoUtils.activeStakeNode()], [DaoUtils.pendingUnstakeNode()], "Request unstake"), discoveryStatus(caller, request.account, DaoUtils.requestUnstakeEdge(), now)),
+        DaoUtils.discoveryEdge(DaoUtils.edgeShape(DaoUtils.cancelUnstakeEdge(), [DaoUtils.pendingUnstakeNode()], [DaoUtils.activeStakeNode()], "Cancel unstake"), discoveryStatus(caller, request.account, DaoUtils.cancelUnstakeEdge(), now)),
+        DaoUtils.discoveryEdge(DaoUtils.edgeShape(DaoUtils.claimUnstakedEdge(), [DaoUtils.pendingUnstakeNode()], [ledgerNode(governanceLedger)], "Claim unstaked"), discoveryStatus(caller, request.account, DaoUtils.claimUnstakedEdge(), now))
+      ];
+      nextCursor = null;
+      witness = null
+    }
   };
 
-  public query func stake_info(user : Principal) : async StakeInfo
-    reads dao
+  public shared query({ caller }) func spi_102_quote(request : QuoteRequest) : async Result<SPI102.Quote, SPI102.ExecuteError>
+    reads governanceLedger, unlockTimes
   {
-    Dao.stakeInfo(dao, user)
-  };
-
-  public query func pending_withdrawal(user : Principal) : async ?PendingWithdrawal
-    reads withdrawOps
-  {
-    WithdrawalOps.pending(withdrawOps, user)
-  };
-
-  public query func proposal(id : Nat) : async ?Proposal
-    reads dao
-  {
-    Dao.proposal(dao, id)
-  };
-
-  public query func vote_info(id : Nat, user : Principal) : async VoteInfo
-    reads dao
-  {
-    Dao.voteInfo(dao, id, user)
-  };
-
-  public shared({ caller }) func spi_101_deposit(
-    request : SPI101.DepositRequest
-  ) : async SPI101.Result<SPI101.DepositReceipt, SPI101.DepositError>
-    reads governanceLedger
-    modifies dao
-  {
-    if (request.amount == 0) {
-      return #err(#zeroAmount)
+    if (not knownEdge(request.edgeId)) {
+      return #err(#unknownEdge)
     };
-    if (request.ledger != governanceLedger) {
-      return #err(#ledgerNotSupported(request.ledger))
+    let now = Time.now();
+    Kernel102.quoteResultForCaller(
+      caller,
+      quoteFor(request.account, request.edgeId, request.intent.amount, now),
+      request,
+      now
+    )
+  };
+
+  public shared({ caller }) func spi_102_execute(request : ExecuteRequest) : async Result<SPI102.Receipt, SPI102.ExecuteError>
+    reads governanceLedger, pendingUnstake, unlockTimes
+    modifies liquid, active, pendingUnstake, unlockTimes
+  {
+    if (not knownEdge(request.quote.edgeId)) {
+      return #err(#unknownEdge)
     };
-    if (not VirtualPrincipal.canControl(caller, request.subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, request.subject)))
-    };
-    if (request.from.owner != caller) {
-      return #err(#sourceOwnerMismatch({
-        caller = caller;
-        fromOwner = request.from.owner
-      }))
-    };
-    switch (Dao.beginDeposit(dao, request.amount)) {
-      case (#err err) {
-        switch (err) {
-          case (#zeroAmount) { #err(#zeroAmount) };
-          case (#ledgerTransferFromErr transferErr) {
-            #err(#ledgerTransferFromErr transferErr)
-          };
-          case (#ledgerTransferFromRejected reject) {
-            #err(#ledgerTransferFromRejected reject)
-          }
-        }
-      };
-      case (#ok _) {
-        let createdAtTime = ledgerCreatedAtTime();
-        let operationId = ledgerCreatedAtTimeNat(createdAtTime);
-        let ledger = governanceLedger;
-        let remote = ICRCLedger.fromPrincipal(ledger);
-        let args = depositTransferFromArgs(
-          request.from,
-          request.amount,
-          operationId,
-          createdAtTime
-        );
-        try {
-          let result = await remote.icrc2_transfer_from(args);
-          switch (result) {
-            case (#Ok txIndex) {
-              switch (
-                Dao.finishDepositOk(
-                  dao,
-                  request.subject,
-                  ledger,
-                  request.amount,
-                  txIndex
-                )
-              ) {
-                case (#ok receipt) {
-                  #ok(spiDepositReceipt(request.subject, request.from, receipt))
-                };
-                case (#err err) {
-                  switch (err) {
-                    case (#zeroAmount) { #err(#zeroAmount) };
-                    case (#ledgerTransferFromErr transferErr) {
-                      #err(#ledgerTransferFromErr transferErr)
-                    };
-                    case (#ledgerTransferFromRejected reject) {
-                      #err(#ledgerTransferFromRejected reject)
-                    }
-                  }
-                }
-              }
-            };
-            case (#Err err) {
-              switch (Dao.finishDepositErr(dao, request.subject, err)) {
-                case (_) { #err(#ledgerTransferFromErr err) }
-              }
-            }
-          }
-        } catch (_) {
-          switch (Dao.finishDepositReject(dao, request.subject, ledgerReject())) {
-            case (_) { #err(#ledgerTransferFromRejected(ledgerReject())) }
-          }
+    let amount = quoteAmount(request.quote);
+    let now = Time.now();
+    let status = statusFor(request.quote.account, request.quote.edgeId, amount, now);
+    let receipt = receiptFor(request.quote, amount, now);
+    switch (Kernel102.checkExecuteForCaller(caller, request.quote, request.guard, receipt, now, status)) {
+      case (?err) { #err(err) };
+      case null {
+        switch (commit(request.quote.account, request.quote.edgeId, amount, now)) {
+          case null { #ok(receipt) };
+          case (?err) { #err(err) }
         }
       }
     }
   };
 
-  public shared({ caller }) func spi_101_withdraw(
-    request : SPI101.WithdrawRequest
-  ) : async SPI101.Result<SPI101.WithdrawReceipt, SPI101.WithdrawError>
+  public shared({ caller }) func spi_103_icrc_deposit(request : IcrcDepositRequest) : async Result<IcrcDepositReceipt, IcrcDepositError>
     reads governanceLedger
-    modifies dao, withdrawOps
-    ensures WithdrawalOps.valid(withdrawOps);
+    modifies liquid
   {
     if (request.amount == 0) {
       return #err(#zeroAmount)
@@ -432,325 +326,163 @@ persistent actor class DaoActorDemo(
     if (request.ledger != governanceLedger) {
       return #err(#ledgerNotSupported(request.ledger))
     };
-    if (not VirtualPrincipal.canControl(caller, request.subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, request.subject)))
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
     };
-    let ledger = governanceLedger;
-    let remote = ICRCLedger.fromPrincipal(ledger);
+    if (request.from.owner != caller) {
+      return #err(#sourceOwnerMismatch({ caller = caller; fromOwner = request.from.owner }))
+    };
+    let remote = ICRCLedger.fromPrincipal(request.ledger);
+    let args = DaoUtils.depositTransferFromArgs(request);
+    try {
+      let result = await remote.icrc2_transfer_from(args);
+      switch (result) {
+        case (#Ok txIndex) {
+          liquid := AccountBook.credit(liquid, request.account, request.amount);
+          #ok({
+            account = request.account;
+            ledger = request.ledger;
+            from = request.from;
+            amount = request.amount;
+            txIndex = txIndex;
+            balanceAfter = AccountBook.nat(liquid, request.account)
+          })
+        };
+        case (#Err err) { #err(#icrcTransferFromErr err) }
+      }
+    } catch (_) {
+      #err(#icrcTransferFromRejected(DaoUtils.ledgerReject()))
+    }
+  };
+
+  public shared({ caller }) func spi_103_icrc_withdraw(request : IcrcWithdrawRequest) : async Result<IcrcWithdrawReceipt, IcrcWithdrawError>
+    reads governanceLedger
+    modifies liquid, pendingWithdrawAmount, pendingWithdrawFee, pendingWithdrawDebit
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.ledger != governanceLedger) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    };
+    let existingDebit = AccountBook.nat(pendingWithdrawDebit, request.account);
+    if (existingDebit > 0) {
+      return #err(#withdrawInProgress({
+        account = request.account;
+        ledger = request.ledger;
+        to = request.to;
+        amount = AccountBook.nat(pendingWithdrawAmount, request.account);
+        fee = AccountBook.nat(pendingWithdrawFee, request.account);
+        debitAmount = existingDebit
+      }))
+    };
+    let remote = ICRCLedger.fromPrincipal(request.ledger);
     try {
       let fee = await remote.icrc1_fee();
-      let ledgerTime = ledgerCreatedAtTime();
-      let createdAtTime = ledgerCreatedAtTimeNat(ledgerTime);
-      switch (
-        WithdrawalOps.begin(
-          withdrawOps,
-          request.subject,
-          ledger,
-          request.amount,
-          fee,
-          createdAtTime
-        )
-      ) {
-        case (#err err) {
-          switch (err) {
-            case (#zeroAmount) { #err(#zeroAmount) };
-            case (#withdrawInProgress) {
-              switch (WithdrawalOps.pending(withdrawOps, request.subject)) {
-                case (?pending) {
-                  #err(#withdrawInProgress(
-                    spiPendingWithdrawal(request.subject, ledger, request.to, pending)
-                  ))
-                };
-                case null {
-                  #err(#withdrawInProgress(spiPendingFromRequest(request, fee)))
-                }
-              }
-            };
-            case (_) { #err(#insufficientLocalBalance) }
-          }
-        };
-        case (#ok opStarted) {
-          switch (
-            Dao.beginWithdraw(
-              dao,
-              request.subject,
-              ledger,
-              request.amount,
-              fee,
-              createdAtTime
-            )
-          ) {
-            case (#err err) {
-              switch (WithdrawalOps.clear(withdrawOps, request.subject, opStarted)) {
-                case (_) {}
+      let debitAmount = request.amount + fee;
+      switch (AccountBook.debit(liquid, request.account, debitAmount)) {
+        case null { #err(#insufficientLocalBalance) };
+        case (?next) {
+          liquid := next;
+          pendingWithdrawAmount := AccountBook.setNat(pendingWithdrawAmount, request.account, request.amount);
+          pendingWithdrawFee := AccountBook.setNat(pendingWithdrawFee, request.account, fee);
+          pendingWithdrawDebit := AccountBook.setNat(pendingWithdrawDebit, request.account, debitAmount);
+          let args = DaoUtils.withdrawTransferArgs(request, fee);
+          try {
+            let result = await remote.icrc1_transfer(args);
+            switch (result) {
+              case (#Ok txIndex) {
+                pendingWithdrawAmount := AccountBook.setNat(pendingWithdrawAmount, request.account, 0);
+                pendingWithdrawFee := AccountBook.setNat(pendingWithdrawFee, request.account, 0);
+                pendingWithdrawDebit := AccountBook.setNat(pendingWithdrawDebit, request.account, 0);
+                #ok({
+                  account = request.account;
+                  ledger = request.ledger;
+                  to = request.to;
+                  amount = request.amount;
+                  fee = fee;
+                  debitAmount = debitAmount;
+                  txIndex = txIndex;
+                  balanceAfter = AccountBook.nat(liquid, request.account)
+                })
               };
-              switch (err) {
-                case (#zeroAmount) { #err(#zeroAmount) };
-                case (#withdrawInProgress) {
-                  #err(#withdrawInProgress(spiPendingFromRequest(request, fee)))
-                };
-                case (#insufficientLiquidBalance) {
-                  #err(#insufficientLocalBalance)
-                };
-                case (#ledgerFeeRejected reject) {
-                  #err(#ledgerFeeRejected reject)
-                };
-                case (#ledgerTransferErr transferErr) {
-                  #err(#ledgerTransferErr transferErr)
-                };
-                case (#ledgerTransferRejected reject) {
-                  #err(#ledgerTransferRejected reject)
-                };
-                case (#withdrawReconciliationRequired transferErr) {
-                  #err(#ledgerTransferErr transferErr)
-                };
-                case (#withdrawReconciliationRejected reject) {
-                  #err(#ledgerTransferRejected reject)
-                };
-                case (#noPendingWithdrawal) {
-                  #err(#insufficientLocalBalance)
-                }
-              }
-            };
-            case (#ok started) {
-              assert started.debitAmount == started.amount + started.fee;
-              let args = withdrawTransferArgs(request.to, started);
-              try {
-                let result = await remote.icrc1_transfer(args);
-                switch (result) {
-                  case (#Ok txIndex) {
-                    switch (Dao.finishWithdrawOk(dao, request.subject, started, txIndex)) {
-                      case (#ok receipt) {
-                        switch (WithdrawalOps.clear(withdrawOps, request.subject, started)) {
-                          case (_) {}
-                        };
-                        #ok(spiWithdrawReceipt(request.subject, request.to, receipt))
-                      };
-                      case (#err err) {
-                        switch (err) {
-                          case (#zeroAmount) { #err(#zeroAmount) };
-                          case (#withdrawInProgress) {
-                            #err(#withdrawInProgress(spiPendingFromRequest(request, fee)))
-                          };
-                          case (#insufficientLiquidBalance) {
-                            #err(#insufficientLocalBalance)
-                          };
-                          case (#ledgerFeeRejected reject) {
-                            #err(#ledgerFeeRejected reject)
-                          };
-                          case (#ledgerTransferErr transferErr) {
-                            #err(#ledgerTransferErr transferErr)
-                          };
-                          case (#ledgerTransferRejected reject) {
-                            #err(#ledgerTransferRejected reject)
-                          };
-                          case (#withdrawReconciliationRequired transferErr) {
-                            #err(#ledgerTransferErr transferErr)
-                          };
-                          case (#withdrawReconciliationRejected reject) {
-                            #err(#ledgerTransferRejected reject)
-                          };
-                          case (#noPendingWithdrawal) {
-                            #err(#insufficientLocalBalance)
-                          }
-                        }
-                      }
-                    }
-                  };
-                  case (#Err err) {
-                    switch (Dao.finishWithdrawErr(dao, request.subject, started, err)) {
-                      case (#ok receipt) {
-                        switch (WithdrawalOps.clear(withdrawOps, request.subject, started)) {
-                          case (_) {}
-                        };
-                        #ok(spiWithdrawReceipt(request.subject, request.to, receipt))
-                      };
-                      case (#err withdrawErr) {
-                        switch (WithdrawalOps.clear(withdrawOps, request.subject, started)) {
-                          case (_) {}
-                        };
-                        switch (withdrawErr) {
-                          case (#ledgerTransferErr transferErr) {
-                            #err(#ledgerTransferErr transferErr)
-                          };
-                          case (#ledgerTransferRejected reject) {
-                            #err(#ledgerTransferRejected reject)
-                          };
-                          case (#withdrawReconciliationRequired transferErr) {
-                            #err(#ledgerTransferErr transferErr)
-                          };
-                          case (#withdrawReconciliationRejected reject) {
-                            #err(#ledgerTransferRejected reject)
-                          };
-                          case (#insufficientLiquidBalance) {
-                            #err(#insufficientLocalBalance)
-                          };
-                          case (#withdrawInProgress) {
-                            #err(#withdrawInProgress(spiPendingFromRequest(request, fee)))
-                          };
-                          case (#ledgerFeeRejected reject) {
-                            #err(#ledgerFeeRejected reject)
-                          };
-                          case (#zeroAmount) { #err(#zeroAmount) };
-                          case (#noPendingWithdrawal) {
-                            #err(#insufficientLocalBalance)
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              } catch (_) {
-                switch (Dao.finishWithdrawReject(dao, request.subject, started, ledgerReject())) {
-                  case (#ok receipt) {
-                    switch (WithdrawalOps.clear(withdrawOps, request.subject, started)) {
-                      case (_) {}
-                    };
-                    #ok(spiWithdrawReceipt(request.subject, request.to, receipt))
-                  };
-                  case (#err err) {
-                    switch (WithdrawalOps.clear(withdrawOps, request.subject, started)) {
-                      case (_) {}
-                    };
-                    switch (err) {
-                      case (#ledgerTransferRejected reject) {
-                        #err(#ledgerTransferRejected reject)
-                      };
-                      case (#withdrawReconciliationRejected reject) {
-                        #err(#ledgerTransferRejected reject)
-                      };
-                      case (#ledgerTransferErr transferErr) {
-                        #err(#ledgerTransferErr transferErr)
-                      };
-                      case (#withdrawReconciliationRequired transferErr) {
-                        #err(#ledgerTransferErr transferErr)
-                      };
-                      case (#insufficientLiquidBalance) {
-                        #err(#insufficientLocalBalance)
-                      };
-                      case (#withdrawInProgress) {
-                        #err(#withdrawInProgress(spiPendingFromRequest(request, fee)))
-                      };
-                      case (#ledgerFeeRejected reject) {
-                        #err(#ledgerFeeRejected reject)
-                      };
-                      case (#zeroAmount) { #err(#zeroAmount) };
-                      case (#noPendingWithdrawal) {
-                        #err(#insufficientLocalBalance)
-                      }
-                    }
-                  }
-                }
+              case (#Err err) {
+                liquid := AccountBook.credit(liquid, request.account, debitAmount);
+                pendingWithdrawAmount := AccountBook.setNat(pendingWithdrawAmount, request.account, 0);
+                pendingWithdrawFee := AccountBook.setNat(pendingWithdrawFee, request.account, 0);
+                pendingWithdrawDebit := AccountBook.setNat(pendingWithdrawDebit, request.account, 0);
+                #err(#icrcTransferErr err)
               }
             }
+          } catch (_) {
+            liquid := AccountBook.credit(liquid, request.account, debitAmount);
+            pendingWithdrawAmount := AccountBook.setNat(pendingWithdrawAmount, request.account, 0);
+            pendingWithdrawFee := AccountBook.setNat(pendingWithdrawFee, request.account, 0);
+            pendingWithdrawDebit := AccountBook.setNat(pendingWithdrawDebit, request.account, 0);
+            #err(#icrcTransferRejected(DaoUtils.ledgerReject()))
           }
         }
       }
     } catch (_) {
-      #err(#ledgerFeeRejected(ledgerReject()))
+      #err(#icrcFeeRejected(DaoUtils.ledgerReject()))
     }
   };
 
-  public shared query func spi_101_balance(
-    request : SPI101.BalanceRequest
-  ) : async SPI101.BalanceReceipt
-    reads governanceLedger, dao
+  public shared query({ caller }) func spi_101_wallet(request : WalletRequest) : async Result<WalletReceipt, WalletError>
+    reads governanceLedger, liquid, active, pendingUnstake, unlockTimes, pendingWithdrawDebit
   {
-    let amount = Dao.liquidBalance(dao, request.subject);
-    if (amount == 0) {
-      { subject = request.subject; entries = [] }
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    };
+    let liquidAmount = AccountBook.nat(liquid, request.account);
+    let activeAmount = AccountBook.nat(active, request.account);
+    let pendingAmount = AccountBook.nat(pendingUnstake, request.account);
+    let withdrawDebit = AccountBook.nat(pendingWithdrawDebit, request.account);
+    let unlockAt = AccountBook.int(unlockTimes, request.account);
+    let now = Time.now();
+    let pendingStatus : SPI101.HoldingStatus = if (pendingAmount > 0 and now < unlockAt) {
+      #locked({ unlockAt = ?unlockAt })
     } else {
-      { subject = request.subject; entries = [(governanceLedger, amount)] }
+      #available
+    };
+    let ledger = ledgerNode(governanceLedger);
+    let liquidEntry = DaoUtils.fungibleEntry(ledger, liquidAmount, #available, null, "Liquid governance balance");
+    let activeEntry = DaoUtils.fungibleEntry(DaoUtils.activeStakeNode(), activeAmount, #available, ?ledger, "Active stake");
+    let pendingEntry = DaoUtils.fungibleEntry(DaoUtils.pendingUnstakeNode(), pendingAmount, pendingStatus, ?ledger, "Pending unstake");
+    let withdrawEntry = DaoUtils.fungibleEntry(DaoUtils.pendingWithdrawalNode(), withdrawDebit, #pending({ unlockAt = null }), ?ledger, "Pending withdrawal");
+    if (liquidAmount == 0 and activeAmount == 0 and pendingAmount == 0 and withdrawDebit == 0) {
+      #ok(SPI101.walletReceipt(request.account, []))
+    } else if (activeAmount == 0 and pendingAmount == 0 and withdrawDebit == 0) {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry]))
+    } else if (liquidAmount == 0 and pendingAmount == 0 and withdrawDebit == 0) {
+      #ok(SPI101.walletReceipt(request.account, [activeEntry]))
+    } else if (liquidAmount == 0 and activeAmount == 0 and withdrawDebit == 0) {
+      #ok(SPI101.walletReceipt(request.account, [pendingEntry]))
+    } else if (liquidAmount == 0 and activeAmount == 0 and pendingAmount == 0) {
+      #ok(SPI101.walletReceipt(request.account, [withdrawEntry]))
+    } else {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry, activeEntry, pendingEntry, withdrawEntry]))
     }
   };
 
-  public shared({ caller }) func stake(
-    subject : Principal,
-    amount : Nat
-  ) : async Result<StakeReceipt, StakeError>
-    reads governanceLedger
-    modifies dao
-    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
+  public query func state(account : SPI100.Account) : async {
+    liquid : Nat;
+    active : Nat;
+    pendingUnstake : Nat;
+    unlockAt : Int;
+    pendingWithdrawDebit : Nat
+  }
+    reads liquid, active, pendingUnstake, unlockTimes, pendingWithdrawDebit
   {
-    if (not VirtualPrincipal.canControl(caller, subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, subject)))
-    };
-    let now = Time.now();
-    Dao.stake(dao, subject, amount, now)
-  };
-
-  public shared({ caller }) func request_unstake(
-    subject : Principal,
-    amount : Nat
-  ) : async Result<RequestUnstakeReceipt, UnstakeError>
-    reads governanceLedger
-    modifies dao
-    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
-  {
-    if (not VirtualPrincipal.canControl(caller, subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, subject)))
-    };
-    let now = Time.now();
-    Dao.requestUnstake(dao, subject, amount, now)
-  };
-
-  public shared({ caller }) func claim_unstaked(
-    subject : Principal
-  ) : async Result<ClaimUnstakeReceipt, UnstakeError>
-    reads governanceLedger
-    modifies dao
-    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
-  {
-    if (not VirtualPrincipal.canControl(caller, subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, subject)))
-    };
-    let now = Time.now();
-    Dao.claimUnstaked(dao, subject, now)
-  };
-
-  public shared({ caller }) func create_proposal(
-    subject : Principal,
-    action : ConfigAction
-  ) : async Result<ProposalReceipt, ProposalError>
-    reads governanceLedger
-    modifies dao
-    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
-  {
-    if (not VirtualPrincipal.canControl(caller, subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, subject)))
-    };
-    let now = Time.now();
-    Dao.createProposal(dao, subject, action, now)
-  };
-
-  public shared({ caller }) func vote(
-    subject : Principal,
-    id : Nat,
-    choice : VoteChoice
-  ) : async Result<VoteReceipt, VoteError>
-    reads governanceLedger
-    modifies dao
-  {
-    if (not VirtualPrincipal.canControl(caller, subject)) {
-      return #err(#subjectNotAuthorized(subjectAuthError(caller, subject)))
-    };
-    let now = Time.now();
-    Dao.vote(dao, subject, id, choice, now)
-  };
-
-  public func close(id : Nat) : async Result<CloseReceipt, CloseError>
-    reads governanceLedger
-    modifies dao
-  {
-    let now = Time.now();
-    Dao.close(dao, id, now)
-  };
-
-  public func execute(id : Nat) : async Result<ExecuteReceipt, ExecuteError>
-    reads governanceLedger
-    modifies dao
-    ensures Dao.totalSupply(dao) == old(Dao.totalSupply(dao));
-  {
-    Dao.execute(dao, id)
+    {
+      liquid = AccountBook.nat(liquid, account);
+      active = AccountBook.nat(active, account);
+      pendingUnstake = AccountBook.nat(pendingUnstake, account);
+      unlockAt = AccountBook.int(unlockTimes, account);
+      pendingWithdrawDebit = AccountBook.nat(pendingWithdrawDebit, account)
+    }
   };
 }

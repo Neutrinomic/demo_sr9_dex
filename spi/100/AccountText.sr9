@@ -1,0 +1,129 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Base58 "mo:spi/100/Base58";
+import Blob "mo:core/Blob";
+import Nat32 "mo:core/Nat32";
+import Text "mo:core/Text";
+import Prim "mo:⛔";
+
+module {
+  public let prefix : Text = "n";
+  public let checksumBytes : Nat = 4;
+
+  private trusted func hasPrefix(chars : [Char]) : Bool
+    requires true;
+    ensures true;
+  {
+    chars.size() >= 1 and chars[0] == 'n'
+  };
+
+  private trusted func stripPrefix(text : Text) : ?Text
+    requires true;
+    ensures true;
+  {
+    let chars = Text.toArray(text);
+    if (not hasPrefix(chars)) {
+      return null
+    };
+    if (chars.size() == 1) {
+      return null
+    };
+    var out = "";
+    var i = 1;
+    while (i < chars.size()) {
+      out #= Text.fromChar(chars[i]);
+      i += 1
+    };
+    ?out
+  };
+
+  private trusted func appendChecksum(account : AccountCodec.Account) : Blob
+    requires true;
+    ensures Blob.size(result) == Blob.size(account) + checksumBytes;
+  {
+    let (c0, c1, c2, c3) = Nat32.explode(Blob.hash(account));
+    let accountBytes = Blob.toArray(account);
+    let accountSize = accountBytes.size();
+    Blob.fromArray(
+      Prim.Array_tabulate<Nat8>(
+        accountSize + checksumBytes,
+        trusted func (i : Nat) : Nat8 {
+          if (i < accountSize) {
+            accountBytes[i]
+          } else if (i == accountSize) {
+            c0
+          } else if (i == accountSize + 1) {
+            c1
+          } else if (i == accountSize + 2) {
+            c2
+          } else {
+            c3
+          }
+        }
+      )
+    )
+  };
+
+  private pure func checksumNat(blob : Blob, start : Nat) : Nat
+    requires start + 3 < Blob.size(blob);
+    ensures result <= 4_294_967_295;
+  {
+    Blob.getNat32BE(blob, start)
+  };
+
+  private trusted func stripAndVerifyChecksum(blob : Blob) : ?AccountCodec.Account
+    requires true;
+    ensures true;
+  {
+    let size = Blob.size(blob);
+    if (size <= checksumBytes) {
+      return null
+    };
+    let payloadSize = size - checksumBytes;
+    let payload = Blob.slice(blob, 0, payloadSize);
+    let expected = Nat32.toNat(Blob.hash(payload));
+    let actual = checksumNat(blob, payloadSize);
+    if (actual != expected) {
+      null
+    } else {
+      ?payload
+    }
+  };
+
+  public pure trusted func encode(account : AccountCodec.Account) : Text
+    requires true;
+    ensures AccountCodec.decode(account) != null ==> decode(result) == ?account;
+    ensures true;
+  {
+    prefix # Base58.encode(appendChecksum(account))
+  };
+
+  public pure trusted func decode(text : Text) : ?AccountCodec.Account
+    requires true;
+    ensures true;
+  {
+    switch (stripPrefix(text)) {
+      case null { null };
+      case (?body) {
+        switch (Base58.decode(body)) {
+          case null { null };
+          case (?encoded) {
+            switch (stripAndVerifyChecksum(encoded)) {
+              case null { null };
+              case (?account) {
+                switch (AccountCodec.decode(account)) {
+                  case null { null };
+                  case (?_) { ?account }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public trusted lemma encodeDecodeRoundtrip(account : AccountCodec.Account) : ()
+    requires AccountCodec.decode(account) != null;
+    ensures decode(encode(account)) == ?account;
+  {}
+}

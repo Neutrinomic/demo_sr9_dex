@@ -1,0 +1,145 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import Base "mo:spi/102/Types";
+import Types "mo:spi/research/102_alt_b_guard_reason_laws/Types";
+
+module {
+  public pure func sameScopedId(a : Base.ScopedId, b : Base.ScopedId) : Bool
+    requires true;
+    ensures result == (a.scope == b.scope and a.namespace == b.namespace and a.id == b.id);
+  {
+    a.scope == b.scope and a.namespace == b.namespace and a.id == b.id
+  };
+
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func quoteLive(q : Base.Quote, now : Int) : Bool
+    requires true;
+  {
+    switch (q.expiresAt) {
+      case null { true };
+      case (?deadline) { now <= deadline }
+    }
+  };
+
+  public pure func receiptBindsQuote(q : Base.Quote, r : Base.Receipt) : Bool
+    requires true;
+    ensures result == (r.account == q.account and sameScopedId(r.edgeId, q.edgeId));
+  {
+    r.account == q.account and sameScopedId(r.edgeId, q.edgeId)
+  };
+
+  public pure trusted func basketAmount(entries : [Base.BasketEntry], node : Base.NodeId) : Nat
+    requires true;
+    ensures true;
+  {
+    var total = 0;
+    for (entry in entries.values()) {
+      if (entry.node == node) { total += entry.amount }
+    };
+    total
+  };
+
+  public pure trusted func basketContains(available : [Base.BasketEntry], required : [Base.BasketEntry]) : Bool
+    requires true;
+    ensures true;
+  {
+    for (needed in required.values()) {
+      if (basketAmount(available, needed.node) < needed.amount) {
+        return false
+      }
+    };
+    true
+  };
+
+  public pure func guardRejectReason(guard : Base.Guard, receipt : Base.Receipt, now : Int) : ?Types.GuardRejectReason
+    requires true;
+  {
+    let deadlineRejected = switch (guard.deadline) {
+      case (?deadline) { now > deadline };
+      case null { false }
+    };
+    if (deadlineRejected) {
+      ?#deadline
+    } else if (not basketContains(receipt.output, guard.minReceive)) {
+      ?#minReceive
+    } else if (guard.maxSpend.size() > 0 and not basketContains(guard.maxSpend, receipt.input)) {
+      ?#maxSpend
+    } else if (guard.maxFee.size() > 0 and not basketContains(guard.maxFee, receipt.fees)) {
+      ?#maxFee
+    } else {
+      null
+    }
+  };
+
+  public pure func guardAccepts(guard : Base.Guard, receipt : Base.Receipt, now : Int) : Bool
+    requires true;
+    ensures result == (guardRejectReason(guard, receipt, now) == null);
+  {
+    guardRejectReason(guard, receipt, now) == null
+  };
+
+  public pure func quoteReturned(isAuthorized : Bool, request : Base.QuoteRequest, q : Base.Quote) : Bool
+    requires true;
+    ensures result == (
+      isAuthorized and request.intent.amount > 0 and q.account == request.account and sameScopedId(q.edgeId, request.edgeId)
+    );
+  {
+    isAuthorized and request.intent.amount > 0 and q.account == request.account and sameScopedId(q.edgeId, request.edgeId)
+  };
+
+  public pure func receiptAccepted(
+    isAuthorized : Bool,
+    q : Base.Quote,
+    guard : Base.Guard,
+    receipt : Base.Receipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      isAuthorized and quoteLive(q, receipt.executedAt) and receiptBindsQuote(q, receipt) and guardAccepts(guard, receipt, receipt.executedAt)
+    );
+  {
+    isAuthorized and quoteLive(q, receipt.executedAt) and receiptBindsQuote(q, receipt) and guardAccepts(guard, receipt, receipt.executedAt)
+  };
+
+  public pure func daoConserves(
+    beforeLiquid : Nat,
+    beforeStaked : Nat,
+    beforePending : Nat,
+    afterLiquid : Nat,
+    afterStaked : Nat,
+    afterPending : Nat
+  ) : Bool
+    requires true;
+    ensures result == (beforeLiquid + beforeStaked + beforePending == afterLiquid + afterStaked + afterPending);
+  {
+    beforeLiquid + beforeStaked + beforePending == afterLiquid + afterStaked + afterPending
+  };
+
+  public pure func dexConserves(
+    beforeA : Nat,
+    beforeB : Nat,
+    afterA : Nat,
+    afterB : Nat,
+    fee : Nat
+  ) : Bool
+    requires true;
+    ensures result == (beforeA + beforeB == afterA + afterB + fee);
+  {
+    beforeA + beforeB == afterA + afterB + fee
+  };
+
+  public lemma acceptedReceiptHasNoGuardReason(
+    isAuthorized : Bool,
+    q : Base.Quote,
+    guard : Base.Guard,
+    receipt : Base.Receipt
+  ) : ()
+    requires receiptAccepted(isAuthorized, q, guard, receipt);
+    ensures guardRejectReason(guard, receipt, receipt.executedAt) == null;
+  {};
+}

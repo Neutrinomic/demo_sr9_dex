@@ -1,7 +1,7 @@
 {
   "workspaceRoot": "../../..",
   "actorFixturesDir": "fixtures/actors",
-  "defaultActor": "unifiedAccountLedger",
+  "defaultActor": "accountCodec",
   "test": {
     "specGlob": "spec/**/*.test.ts",
     "timeoutMs": 240000,
@@ -9,30 +9,9 @@
     "exceptionsFile": "exceptions.ts"
   },
   "actors": {
-    "unifiedAccountLedger": {
-      "name": "UnifiedAccountLedgerDemo",
-      "source": "../examples/UnifiedAccountLedgerDemo.sr9",
-      "cycles": "10000000000000",
-      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
-      "packages": [
-        {
-          "name": "core",
-          "path": "core/src",
-          "env": "CORE_PACKAGE_PATH",
-          "findUp": true,
-          "bundledFallback": true
-        },
-        {
-          "name": "spi",
-          "path": "spi",
-          "env": "SPI_PACKAGE_PATH",
-          "findUp": true
-        }
-      ]
-    },
-    "protocolVirtualAsset": {
-      "name": "ProtocolVirtualAssetDemo",
-      "source": "../examples/ProtocolVirtualAssetDemo.sr9",
+    "accountCodec": {
+      "name": "SPI100CodecActor",
+      "source": "../examples/SPI100CodecActor.sr9",
       "cycles": "10000000000000",
       "compileFlags": ["--legacy-persistence", "--legacy-actors"],
       "packages": [

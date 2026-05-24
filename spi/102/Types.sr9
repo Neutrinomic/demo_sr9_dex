@@ -1,0 +1,282 @@
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+import SPI100 "mo:spi/100/AccountCodec";
+
+module {
+  // Common success/error envelope used by quote and execute.
+  public type Result<Ok, Err> = { #ok : Ok; #err : Err };
+
+  // SPI-102 transitions use the same holding identity types that SPI-101
+  // wallet entries expose.
+  public type ScopedId = SPI101.ScopedId;
+  public type LedgerId = SPI101.LedgerId;
+  public type CanisterId = SPI101.CanisterId;
+  public type NodeId = SPI101.NodeId;
+  public type NodeForm = SPI101.NodeForm;
+
+  // Stable canister-scoped transition id.
+  public type EdgeId = ScopedId;
+
+  // Client-facing description of a node id returned by discovery.
+  public type NodeShape = {
+    // Stable id used by edges, quotes, baskets, and receipts.
+    nodeId : NodeId;
+    // Whether this node represents fungible or nonfungible holdings.
+    form : NodeForm;
+    // Optional display/underlying asset node when it differs from `node`.
+    // `null` means clients can display `node` itself.
+    displayAsset : ?NodeId;
+    // Optional human-readable label, e.g. "BTC balance" or "Pending unstake".
+    displayLabel : ?Text;
+    // Optional warning/risk tag clients can display.
+    risk : ?Text
+  };
+
+  // Static shape of a transition. Amounts are not here; amounts are chosen in
+  // quote intent and reported in quote/receipt baskets.
+  public type EdgeShape = {
+    // Stable transition id.
+    edgeId : EdgeId;
+    // Nodes this edge may consume, lock, or otherwise require.
+    inputNodes : [NodeId];
+    // Nodes this edge may produce, unlock, or otherwise affect.
+    outputNodes : [NodeId];
+    // Optional human-readable transition label.
+    displayLabel : ?Text;
+    // Optional warning/risk tag for this edge.
+    risk : ?Text
+  };
+
+  // Account-specific status for a discovered edge at the canister's current
+  // local state/time. This is informational; execute must recheck.
+  public type DiscoveryStatus = {
+    // The edge appears executable for this account, assuming quote/guard pass.
+    #live;
+    // The edge exists but is time-locked until `unlockAt`.
+    #notMature : { unlockAt : Int };
+    // The account currently has no usable input/capacity for this edge.
+    #insufficientInput;
+    // The protocol has paused this edge.
+    #paused;
+    // The caller cannot discover or act for the requested account.
+    #unauthorized;
+    // Protocol-specific status. Clients should display but not interpret it.
+    #protocolSpecific : Text
+  };
+
+  // One edge in the discovery graph, with account-specific status.
+  public type DiscoveryEdge = {
+    // Transition shape and stable id.
+    edge : EdgeShape;
+    // Current status for this account.
+    status : DiscoveryStatus
+  };
+
+  // Discovery graph response. It includes node descriptions and edge
+  // descriptions so clients can explain every id referenced by the graph.
+  public type Discovery = {
+    // Account the graph was filtered for.
+    account : SPI100.Account;
+    // Node descriptions referenced by `edges`.
+    nodes : [NodeShape];
+    // Edge descriptions plus account-specific status.
+    edges : [DiscoveryEdge];
+    // Optional pagination cursor when discovery is too large for one response.
+    nextCursor : ?Nat;
+    // Optional protocol-specific lookup hint. Not authority.
+    witness : ?Text
+  };
+
+  // Amount of one node in a quote, guard, or receipt.
+  public type BasketEntry = {
+    // Node being counted.
+    node : NodeId;
+    // Quantity for the node.
+    amount : Nat
+  };
+
+  // Exact position movement for edges that touch non-fungible or semi-fungible
+  // positions. Baskets aggregate by node; effects expose ids and remainders.
+  public type PositionEffect = {
+    // Position class or related node.
+    node : NodeId;
+    // Optional concrete position id inside the class.
+    positionId : ?Nat;
+    // Amount consumed, produced, or remaining.
+    amount : Nat;
+    // Optional maturity/unlock time for this position effect after transition.
+    // Wallet holdings carry this timing inside SPI-101 HoldingStatus.
+    unlockAt : ?Int;
+    // Optional protocol metadata pointer or compact description.
+    metadata : ?Text
+  };
+
+  // User intent for quoting one edge.
+  public type Intent = {
+    // Amount the user wants to quote. Meaning is edge-specific but usually
+    // exact input, exact output, shares, debt, or position amount.
+    amount : Nat;
+    // Optional concrete position id when quoting a position-specific edge.
+    positionId : ?Nat;
+    // Optional protocol-specific intent data. This should be used only when the
+    // core fields are insufficient, and protocols should document its format.
+    extension : ?Text
+  };
+
+  // Reusable, account-bound preview of one edge. A quote is not a reservation;
+  // execute must recheck current state and guard acceptance.
+  public type Quote = {
+    // Account whose state the quote applies to.
+    account : SPI100.Account;
+    // Edge this quote is bound to.
+    edgeId : EdgeId;
+    // Expected inputs for the transition.
+    input : [BasketEntry];
+    // Expected outputs for the transition.
+    output : [BasketEntry];
+    // Exact position ids/effects consumed or locked.
+    positionInputs : [PositionEffect];
+    // Exact position ids/effects produced or increased.
+    positionOutputs : [PositionEffect];
+    // Fees previewed by the protocol.
+    fees : [BasketEntry];
+    // Optional quote freshness bound. Execute rejects after this time.
+    expiresAt : ?Int;
+    // Optional human/protocol-readable facts execute must recheck or tolerate.
+    preconditions : ?Text;
+    // Optional protocol-specific lookup hint. Not authority.
+    witness : ?Text
+  };
+
+  // User acceptance limits supplied at execute time. These protect the account
+  // against stale quotes, price movement, fee changes, and state changes.
+  public type Guard = {
+    // Minimum outputs the receipt must contain.
+    minReceive : [BasketEntry];
+    // Maximum inputs the receipt may consume. Empty means no generic max.
+    maxSpend : [BasketEntry];
+    // Caller-selected latest acceptable execution time.
+    deadline : ?Int;
+    // Maximum fees the receipt may charge. Empty means no generic max.
+    maxFee : [BasketEntry];
+    // Optional protocol-defined bound on price impact.
+    maxPriceImpact : ?Nat;
+    // Optional minimum shares for vault/LP mint edges.
+    minShares : ?Nat;
+    // Optional maximum debt for borrow/refinance edges.
+    maxDebt : ?Nat;
+    // Optional minimum health factor or safety score after execution.
+    minHealth : ?Nat;
+    // Optional protocol-specific guard data. Use only for acceptance constraints
+    // that cannot be represented by the generic fields.
+    extension : ?Text
+  };
+
+  // Result of successful execute. This is the authoritative record of what
+  // changed, not just a copy of the quote.
+  public type Receipt = {
+    // Account whose state changed.
+    account : SPI100.Account;
+    // Edge that executed.
+    edgeId : EdgeId;
+    // Inputs actually consumed or locked.
+    input : [BasketEntry];
+    // Outputs actually produced or unlocked.
+    output : [BasketEntry];
+    // Position effects actually consumed or locked.
+    positionInputs : [PositionEffect];
+    // Position effects actually produced or increased.
+    positionOutputs : [PositionEffect];
+    // Remaining position effects after partial consume/split/merge.
+    positionRemaining : [PositionEffect];
+    // Fees actually charged.
+    fees : [BasketEntry];
+    // Canister-local execution time.
+    executedAt : Int;
+    // Optional protocol witness for audit/debug lookup. Not authority.
+    witness : ?Text
+  };
+
+  // Generic execution errors. Protocols can add detail with #protocolSpecific.
+  public type ExecuteError = {
+    // Caller cannot control the quote account.
+    #accountNotAuthorized : {
+      caller : Principal;
+      account : SPI100.Account
+    };
+    // Receipt preview/commit did not bind to the quote account and edge.
+    #quoteReceiptMismatch;
+    // Execute guard rejected the receipt.
+    #guardRejected;
+    // Edge is not currently live.
+    #edgeNotLive : DiscoveryStatus;
+    // Unknown or unsupported edge id.
+    #unknownEdge;
+    // Invalid quote/intent amount or missing required position id.
+    #invalidAmount;
+    // Account lacks current input/capacity.
+    #insufficientInput;
+    // Quote freshness bound has passed.
+    #expiredQuote;
+    // Protocol-specific error.
+    #protocolSpecific : Text
+  };
+
+  // Request for an account-specific transition graph. This intentionally has no
+  // amount and no caller-provided time.
+  public type DiscoverRequest = {
+    // Account whose available graph should be described.
+    account : SPI100.Account;
+    // Optional pagination cursor previously returned by discovery.
+    cursor : ?Nat;
+    // Optional page size hint. Protocols may cap or ignore it.
+    limit : ?Nat;
+    // Optional protocol-specific filter data, e.g. market family, asset family,
+    // or UI profile. This is not quote intent and should not carry amount.
+    filter : ?Text
+  };
+
+  // Request to quote one edge for one account.
+  public type QuoteRequest = {
+    // Account the caller wants to quote for.
+    account : SPI100.Account;
+    // Edge selected from discovery.
+    edgeId : EdgeId;
+    // Amount/position/protocol-specific quote intent.
+    intent : Intent
+  };
+
+  // Request to execute a quote under caller acceptance limits.
+  public type ExecuteRequest = {
+    // Quote returned by `spi_102_quote`.
+    quote : Quote;
+    // Caller acceptance limits.
+    guard : Guard
+  };
+
+  // Minimal actor surface. Implementations may expose richer protocol-specific
+  // methods, but these three methods are the SPI-102 core.
+  public type Actor = actor {
+    // Discover account-specific graph: node shapes plus edge statuses.
+    spi_102_discover : shared query (request : DiscoverRequest) ->
+      async Discovery contract {
+        requires true;
+        ensures true;
+      };
+
+    // Quote exactly one edge. Read-only and not a reservation.
+    spi_102_quote : shared query (request : QuoteRequest) ->
+      async Result<Quote, ExecuteError> contract {
+        requires true;
+        ensures true;
+      };
+
+    // Execute one quote locally and atomically. No awaits inside execution.
+    spi_102_execute : shared (request : ExecuteRequest) ->
+      async Result<Receipt, ExecuteError> contract {
+        requires true;
+        ensures true;
+      }
+  };
+
+}

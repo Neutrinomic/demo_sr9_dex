@@ -1,0 +1,189 @@
+type WalletRequest = 
+ record {
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
+ };
+type WalletReceipt = 
+ record {
+   account: Account;
+   entries: vec WalletEntry;
+   nextCursor: opt nat;
+   witness: opt text;
+ };
+type WalletHolding = 
+ variant {
+   fungible: record {
+               amount: nat;
+               meta: NoMetadata;
+             };
+   nonfungible: record {
+                  id: nat;
+                  meta: NoMetadata;
+                };
+ };
+type WalletError = variant {
+                     accountNotAuthorized:
+                      record {
+                        account: Account;
+                        caller: principal;
+                      };};
+type WalletEntry = 
+ record {
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   holding: WalletHolding;
+   node: NodeId;
+   status: HoldingStatus;
+ };
+type TransferFromError = 
+ variant {
+   BadBurn: record {min_burn_amount: nat;};
+   BadFee: record {expected_fee: nat;};
+   CreatedInFuture: record {ledger_time: nat64;};
+   Duplicate: record {duplicate_of: nat;};
+   GenericError: record {
+                   error_code: nat;
+                   message: text;
+                 };
+   InsufficientAllowance: record {allowance: nat;};
+   InsufficientFunds: record {balance: nat;};
+   TemporarilyUnavailable;
+   TooOld;
+ };
+type TransferError = 
+ variant {
+   BadBurn: record {min_burn_amount: nat;};
+   BadFee: record {expected_fee: nat;};
+   CreatedInFuture: record {ledger_time: nat64;};
+   Duplicate: record {duplicate_of: nat;};
+   GenericError: record {
+                   error_code: nat;
+                   message: text;
+                 };
+   InsufficientFunds: record {balance: nat;};
+   TemporarilyUnavailable;
+   TooOld;
+ };
+type Subaccount = blob;
+type Result_2 = 
+ variant {
+   err: WalletError;
+   ok: WalletReceipt;
+ };
+type Result_1 = 
+ variant {
+   err: IcrcDepositError;
+   ok: IcrcDepositReceipt;
+ };
+type Result = 
+ variant {
+   err: IcrcWithdrawError;
+   ok: IcrcWithdrawReceipt;
+ };
+type PendingIcrcWithdrawal = 
+ record {
+   account: Account;
+   amount: nat;
+   debitAmount: nat;
+   fee: nat;
+   ledger: LedgerId;
+   to: Account__1;
+ };
+type NodeId = 
+ variant {
+   ledger: LedgerId;
+   local: blob;
+ };
+type NoMetadata = null;
+type LedgerReject = record {message: text;};
+type LedgerId = principal;
+type InFlightRestoreBridgeActor = 
+ service {
+   raw_pending: () -> (opt PendingIcrcWithdrawal) query;
+   spi_100_account: (wallet: principal, id: nat) -> (opt Account) query;
+   spi_101_wallet: (request: WalletRequest) -> (Result_2) query;
+   spi_103_icrc_deposit: (request: IcrcDepositRequest) -> (Result_1);
+   spi_103_icrc_withdraw: (request: IcrcWithdrawRequest) -> (Result);
+ };
+type IcrcWithdrawRequest = 
+ record {
+   account: Account;
+   amount: nat;
+   ledger: LedgerId;
+   to: Account__1;
+ };
+type IcrcWithdrawReceipt = 
+ record {
+   account: Account;
+   amount: nat;
+   balanceAfter: nat;
+   debitAmount: nat;
+   fee: nat;
+   ledger: LedgerId;
+   to: Account__1;
+   txIndex: nat;
+ };
+type IcrcWithdrawError = 
+ variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
+   icrcFeeRejected: LedgerReject;
+   icrcTransferErr: TransferError;
+   icrcTransferRejected: LedgerReject;
+   insufficientLocalBalance;
+   ledgerNotSupported: LedgerId;
+   withdrawInProgress: PendingIcrcWithdrawal;
+   zeroAmount;
+ };
+type IcrcDepositRequest = 
+ record {
+   account: Account;
+   amount: nat;
+   from: Account__1;
+   ledger: LedgerId;
+ };
+type IcrcDepositReceipt = 
+ record {
+   account: Account;
+   amount: nat;
+   balanceAfter: nat;
+   from: Account__1;
+   ledger: LedgerId;
+   txIndex: nat;
+ };
+type IcrcDepositError = 
+ variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
+   amountTooLow: record {
+                   amount: nat;
+                   minAmount: nat;
+                 };
+   icrcTransferFromErr: TransferFromError;
+   icrcTransferFromRejected: LedgerReject;
+   ledgerNotSupported: LedgerId;
+   sourceOwnerMismatch: record {
+                          caller: principal;
+                          fromOwner: principal;
+                        };
+   zeroAmount;
+ };
+type HoldingStatus = 
+ variant {
+   available;
+   locked: record {unlockAt: opt int;};
+   pending: record {unlockAt: opt int;};
+ };
+type Account__1 = 
+ record {
+   owner: principal;
+   subaccount: opt Subaccount;
+ };
+type Account = blob;
+service : (supportedLedger: principal, minDeposit: nat) -> InFlightRestoreBridgeActor

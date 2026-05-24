@@ -1,0 +1,98 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import Runtime "mo:core/Runtime";
+
+persistent actor class MockIcrcLedger(defaultFee : Nat) {
+  public type Mode = {
+    #success;
+    #transferFromErr;
+    #transferFromReject;
+    #feeReject;
+    #transferErr;
+    #transferReject
+  };
+
+  var mode : Mode = #success;
+  var nextTx : Nat = 0;
+
+  public shared func set_mode(next : Mode) : async ()
+    modifies mode
+  {
+    mode := next
+  };
+
+  public shared query func get_mode() : async Mode
+    reads mode
+  {
+    mode
+  };
+
+  public shared query func icrc1_balance_of(_account : ICRCLedger.Account) : async Nat
+    requires true;
+  {
+    0
+  };
+
+  public shared query trusted func icrc1_fee() : async Nat
+    reads mode, defaultFee
+    requires true;
+    ensures true;
+  {
+    switch (mode) {
+      case (#feeReject) { Runtime.trap("mock fee reject") };
+      case (_) { defaultFee }
+    }
+  };
+
+  public shared query func icrc1_total_supply() : async Nat
+    requires true;
+  {
+    0
+  };
+
+  public shared query func icrc2_allowance(_args : ICRCLedger.AllowanceArgs) : async ICRCLedger.AllowanceResult
+    requires true;
+  {
+    {
+      allowance = 1_000_000_000;
+      expires_at = null
+    }
+  };
+
+  public shared trusted func icrc2_transfer_from(_args : ICRCLedger.TransferFromArgs) : async ICRCLedger.TransferFromResult
+    reads mode
+    modifies nextTx
+    requires true;
+    ensures true;
+  {
+    switch (mode) {
+      case (#transferFromErr) {
+        #Err(#GenericError({ message = "mock transfer_from err"; error_code = 1 }))
+      };
+      case (#transferFromReject) { Runtime.trap("mock transfer_from reject") };
+      case (_) {
+        let tx = nextTx;
+        nextTx += 1;
+        #Ok(tx)
+      }
+    }
+  };
+
+  public shared trusted func icrc1_transfer(_args : ICRCLedger.TransferArg) : async ICRCLedger.TransferResult
+    reads mode
+    modifies nextTx
+    requires true;
+    ensures true;
+  {
+    switch (mode) {
+      case (#transferErr) {
+        #Err(#GenericError({ message = "mock transfer err"; error_code = 2 }))
+      };
+      case (#transferReject) { Runtime.trap("mock transfer reject") };
+      case (_) {
+        let tx = nextTx;
+        nextTx += 1;
+        #Ok(tx)
+      }
+    }
+  }
+}

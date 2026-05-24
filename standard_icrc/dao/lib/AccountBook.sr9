@@ -1,0 +1,97 @@
+import Blob "mo:core/Blob";
+import BMap "mo:core/pure/BMap";
+import SPI100 "mo:spi/100/AccountCodec";
+
+module {
+  public type Account = SPI100.Account;
+  public type NatBook = BMap.BMap<Account, Nat>;
+  public type IntBook = BMap.BMap<Account, Int>;
+
+  public pure func orderedNat(book : NatBook) : Bool
+    requires true;
+  {
+    BMap.orderedBy<Account, Nat>(book, Blob.compare)
+  };
+
+  public pure func orderedInt(book : IntBook) : Bool
+    requires true;
+  {
+    BMap.orderedBy<Account, Int>(book, Blob.compare)
+  };
+
+  public pure func orderedNat4(a : NatBook, b : NatBook, c : NatBook, d : NatBook) : Bool
+    requires true;
+  {
+    orderedNat(a) and orderedNat(b) and orderedNat(c) and orderedNat(d)
+  };
+
+  public func emptyNat() : NatBook
+    requires true;
+    ensures orderedNat(result);
+  {
+    BMap.orderedBy_empty<Account, Nat>(Blob.compare);
+    BMap.empty<Account, Nat>()
+  };
+
+  public func emptyInt() : IntBook
+    requires true;
+    ensures orderedInt(result);
+  {
+    BMap.orderedBy_empty<Account, Int>(Blob.compare);
+    BMap.empty<Account, Int>()
+  };
+
+  public pure func nat(book : NatBook, account : Account) : Nat
+    requires orderedNat(book);
+  {
+    switch (BMap.get<Account, Nat>(book, Blob.compare, account)) {
+      case null { 0 };
+      case (?amount) { amount }
+    }
+  };
+
+  public pure func int(book : IntBook, account : Account) : Int
+    requires orderedInt(book);
+  {
+    switch (BMap.get<Account, Int>(book, Blob.compare, account)) {
+      case null { 0 };
+      case (?value) { value }
+    }
+  };
+
+  public pure trusted func setNat(book : NatBook, account : Account, amount : Nat) : NatBook
+    requires orderedNat(book);
+    ensures orderedNat(result);
+  {
+    BMap.add<Account, Nat>(book, Blob.compare, account, amount)
+  };
+
+  public pure trusted func setInt(book : IntBook, account : Account, value : Int) : IntBook
+    requires orderedInt(book);
+    ensures orderedInt(result);
+  {
+    BMap.add<Account, Int>(book, Blob.compare, account, value)
+  };
+
+  public pure trusted func credit(book : NatBook, account : Account, amount : Nat) : NatBook
+    requires orderedNat(book);
+    ensures orderedNat(result);
+  {
+    setNat(book, account, nat(book, account) + amount)
+  };
+
+  public pure trusted func debit(book : NatBook, account : Account, amount : Nat) : ?NatBook
+    requires orderedNat(book);
+    ensures switch (result) {
+      case null { true };
+      case (?next) { orderedNat(next) }
+    };
+  {
+    let current = nat(book, account);
+    if (current < amount) {
+      null
+    } else {
+      ?setNat(book, account, current - amount)
+    }
+  };
+}

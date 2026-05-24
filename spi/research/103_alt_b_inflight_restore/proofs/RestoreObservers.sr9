@@ -1,0 +1,38 @@
+import Kernel "mo:spi/research/103_alt_b_inflight_restore/Kernel";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public pure func depositSuccessAddsAmount(before : Nat, amount : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.depositSuccessCreditsExactly(before, amount, before + amount)
+  };
+
+  public pure func depositFailureLeavesBalance(before : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.depositFailureCreatesNoCredit(before, before)
+  };
+
+  public lemma startedWithdrawalHasDebit(
+    before : Nat,
+    amount : Nat,
+    fee : Nat,
+    afterDebit : Nat,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : ()
+    requires Kernel.withdrawalStarted(before, amount, fee, afterDebit, pending);
+    ensures Kernel.withdrawalCanReserve(before, amount, fee);
+    ensures pending.debitAmount == amount + fee;
+  {};
+
+  public pure func failedWithdrawalRestores(before : Nat) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.withdrawFailureRestores(before, before, true)
+  };
+}
+

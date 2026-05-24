@@ -1,0 +1,75 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import AccountText "mo:spi/100/AccountText";
+
+module {
+  public func encodeDecodeRoundtrip(wallet : Principal, id : Nat) : AccountCodec.Account
+    requires AccountCodec.isUsableWallet(wallet);
+    requires id <= AccountCodec.maxId;
+    ensures AccountCodec.decode(result) == ?{ wallet = wallet; id = id };
+  {
+    switch (AccountCodec.encode(wallet, id)) {
+      case null {
+        assert false;
+        ""
+      };
+      case (?account) {
+        assert AccountCodec.decode(account) == ?{ wallet = wallet; id = id };
+        account
+      }
+    }
+  };
+
+  public func decodedIdIsBounded(account : AccountCodec.Account) : ()
+    requires AccountCodec.decode(account) != null;
+    ensures switch (AccountCodec.decode(account)) {
+      case null { false };
+      case (?decoded) { decoded.id <= AccountCodec.maxId }
+    };
+  {};
+
+  public func encodedAccountsDoNotCollide(
+    walletA : Principal,
+    idA : Nat,
+    walletB : Principal,
+    idB : Nat
+  ) : ()
+    requires AccountCodec.isUsableWallet(walletA);
+    requires AccountCodec.isUsableWallet(walletB);
+    requires idA <= AccountCodec.maxId;
+    requires idB <= AccountCodec.maxId;
+    requires walletA != walletB or idA != idB;
+    ensures AccountCodec.encode(walletA, idA) != AccountCodec.encode(walletB, idB);
+  {
+    AccountCodec.encodeNoCollision(walletA, idA, walletB, idB)
+  };
+
+  public func validDecodedAccountsDoNotCollide(
+    accountA : AccountCodec.Account,
+    accountB : AccountCodec.Account
+  ) : ()
+    requires AccountCodec.decode(accountA) != null;
+    requires AccountCodec.decode(accountB) != null;
+    requires accountA != accountB;
+    ensures AccountCodec.decode(accountA) != AccountCodec.decode(accountB);
+  {
+    AccountCodec.validDecodeNoCollision(accountA, accountB)
+  };
+
+  public func validDecodedAccountsAreInjective(
+    accountA : AccountCodec.Account,
+    accountB : AccountCodec.Account
+  ) : ()
+    requires AccountCodec.decode(accountA) != null;
+    requires AccountCodec.decode(accountB) != null;
+    ensures AccountCodec.decode(accountA) == AccountCodec.decode(accountB) ==> accountA == accountB;
+  {
+    AccountCodec.validDecodeInjective(accountA, accountB)
+  };
+
+  public func textRoundtrip(account : AccountCodec.Account) : Text
+    requires AccountCodec.decode(account) != null;
+    ensures AccountText.decode(result) == ?account;
+  {
+    AccountText.encode(account)
+  }
+}

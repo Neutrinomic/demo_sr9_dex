@@ -1,164 +1,181 @@
 export const idlFactory = ({ IDL }) => {
-  const ClaimUnstakeReceipt = IDL.Record({
+  const Account = IDL.Vec(IDL.Nat8);
+  const WalletRequest = IDL.Record({
+    'cursor' : IDL.Opt(IDL.Nat),
+    'limit' : IDL.Opt(IDL.Nat),
+    'filter' : IDL.Opt(IDL.Text),
+    'account' : Account,
+  });
+  const HoldingStatus = IDL.Variant({
+    'pending' : IDL.Record({ 'unlockAt' : IDL.Opt(IDL.Int) }),
+    'locked' : IDL.Record({ 'unlockAt' : IDL.Opt(IDL.Int) }),
+    'available' : IDL.Null,
+  });
+  const LedgerId = IDL.Principal;
+  const NodeId = IDL.Variant({
+    'local' : IDL.Vec(IDL.Nat8),
+    'ledger' : LedgerId,
+  });
+  const NoMetadata = IDL.Null;
+  const WalletHolding = IDL.Variant({
+    'fungible' : IDL.Record({ 'meta' : NoMetadata, 'amount' : IDL.Nat }),
+    'nonfungible' : IDL.Record({ 'id' : IDL.Nat, 'meta' : NoMetadata }),
+  });
+  const WalletEntry = IDL.Record({
+    'status' : HoldingStatus,
+    'displayAsset' : IDL.Opt(NodeId),
+    'node' : NodeId,
+    'displayLabel' : IDL.Opt(IDL.Text),
+    'holding' : WalletHolding,
+  });
+  const WalletReceipt = IDL.Record({
+    'witness' : IDL.Opt(IDL.Text),
+    'entries' : IDL.Vec(WalletEntry),
+    'account' : Account,
+    'nextCursor' : IDL.Opt(IDL.Nat),
+  });
+  const WalletError = IDL.Variant({
+    'accountNotAuthorized' : IDL.Record({
+      'account' : Account,
+      'caller' : IDL.Principal,
+    }),
+  });
+  const Result_4 = IDL.Variant({ 'ok' : WalletReceipt, 'err' : WalletError });
+  const DiscoverRequest = IDL.Record({
+    'cursor' : IDL.Opt(IDL.Nat),
+    'limit' : IDL.Opt(IDL.Nat),
+    'filter' : IDL.Opt(IDL.Text),
+    'account' : Account,
+  });
+  const DiscoveryStatus = IDL.Variant({
+    'insufficientInput' : IDL.Null,
+    'notMature' : IDL.Record({ 'unlockAt' : IDL.Int }),
+    'live' : IDL.Null,
+    'protocolSpecific' : IDL.Text,
+    'unauthorized' : IDL.Null,
+    'paused' : IDL.Null,
+  });
+  const CanisterId = IDL.Principal;
+  const EdgeId = IDL.Record({
+    'id' : IDL.Nat,
+    'scope' : CanisterId,
+    'namespace' : IDL.Text,
+  });
+  const EdgeShape = IDL.Record({
+    'inputNodes' : IDL.Vec(NodeId),
+    'edgeId' : EdgeId,
+    'risk' : IDL.Opt(IDL.Text),
+    'displayLabel' : IDL.Opt(IDL.Text),
+    'outputNodes' : IDL.Vec(NodeId),
+  });
+  const DiscoveryEdge = IDL.Record({
+    'status' : DiscoveryStatus,
+    'edge' : EdgeShape,
+  });
+  const NodeForm = IDL.Variant({
+    'fungible' : IDL.Null,
+    'nonfungible' : IDL.Null,
+  });
+  const NodeShape = IDL.Record({
+    'nodeId' : NodeId,
+    'displayAsset' : IDL.Opt(NodeId),
+    'form' : NodeForm,
+    'risk' : IDL.Opt(IDL.Text),
+    'displayLabel' : IDL.Opt(IDL.Text),
+  });
+  const Discovery = IDL.Record({
+    'witness' : IDL.Opt(IDL.Text),
+    'edges' : IDL.Vec(DiscoveryEdge),
+    'nodes' : IDL.Vec(NodeShape),
+    'account' : Account,
+    'nextCursor' : IDL.Opt(IDL.Nat),
+  });
+  const BasketEntry = IDL.Record({ 'node' : NodeId, 'amount' : IDL.Nat });
+  const PositionEffect = IDL.Record({
+    'metadata' : IDL.Opt(IDL.Text),
+    'node' : NodeId,
+    'unlockAt' : IDL.Opt(IDL.Int),
+    'positionId' : IDL.Opt(IDL.Nat),
     'amount' : IDL.Nat,
-    'liquidBalance' : IDL.Nat,
   });
-  const UnstakeError = IDL.Variant({
-    'unstakeAlreadyPending' : IDL.Null,
-    'zeroAmount' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
-      'caller' : IDL.Principal,
-    }),
-    'insufficientActiveStake' : IDL.Null,
-    'cooldownActive' : IDL.Record({ 'now' : IDL.Int, 'unlockAt' : IDL.Int }),
-    'stakeLockedForVote' : IDL.Record({
-      'lockedStake' : IDL.Nat,
-      'activeStake' : IDL.Nat,
-    }),
-    'noPendingUnstake' : IDL.Null,
+  const Quote = IDL.Record({
+    'output' : IDL.Vec(BasketEntry),
+    'expiresAt' : IDL.Opt(IDL.Int),
+    'edgeId' : EdgeId,
+    'fees' : IDL.Vec(BasketEntry),
+    'preconditions' : IDL.Opt(IDL.Text),
+    'witness' : IDL.Opt(IDL.Text),
+    'account' : Account,
+    'input' : IDL.Vec(BasketEntry),
+    'positionOutputs' : IDL.Vec(PositionEffect),
+    'positionInputs' : IDL.Vec(PositionEffect),
   });
-  const Result_6 = IDL.Variant({
-    'ok' : ClaimUnstakeReceipt,
-    'err' : UnstakeError,
+  const Guard = IDL.Record({
+    'maxSpend' : IDL.Vec(BasketEntry),
+    'maxPriceImpact' : IDL.Opt(IDL.Nat),
+    'minHealth' : IDL.Opt(IDL.Nat),
+    'deadline' : IDL.Opt(IDL.Int),
+    'minShares' : IDL.Opt(IDL.Nat),
+    'maxFee' : IDL.Vec(BasketEntry),
+    'maxDebt' : IDL.Opt(IDL.Nat),
+    'extension' : IDL.Opt(IDL.Text),
+    'minReceive' : IDL.Vec(BasketEntry),
   });
-  const ProposalStatus = IDL.Variant({
-    'open' : IDL.Null,
-    'stale' : IDL.Null,
-    'executed' : IDL.Null,
-    'failed' : IDL.Null,
-    'passed' : IDL.Null,
-  });
-  const CloseReceipt = IDL.Record({
-    'id' : IDL.Nat,
-    'status' : ProposalStatus,
-    'noVotes' : IDL.Nat,
-    'quorumVotes' : IDL.Nat,
-    'yesVotes' : IDL.Nat,
-  });
-  const CloseError = IDL.Variant({
-    'proposalNotFound' : IDL.Null,
-    'votingPeriodActive' : IDL.Record({
-      'now' : IDL.Int,
-      'deadline' : IDL.Int,
-    }),
-    'proposalNotOpen' : IDL.Null,
-  });
-  const Result_5 = IDL.Variant({ 'ok' : CloseReceipt, 'err' : CloseError });
-  const Config = IDL.Record({
-    'quorumVotes' : IDL.Nat,
-    'proposalThreshold' : IDL.Nat,
-  });
-  const ConfigAction = IDL.Variant({
-    'setConfig' : Config,
-    'setQuorum' : IDL.Nat,
-    'setProposalThreshold' : IDL.Nat,
-  });
-  const ProposalReceipt = IDL.Record({
-    'id' : IDL.Nat,
-    'quorumVotes' : IDL.Nat,
-    'createdAt' : IDL.Int,
-    'configVersion' : IDL.Nat,
-    'deadline' : IDL.Int,
-    'proposer' : IDL.Principal,
-    'snapshotActiveStake' : IDL.Nat,
-  });
-  const ProposalError = IDL.Variant({
-    'proposalThresholdNotMet' : IDL.Null,
-    'stakeLockActive' : IDL.Record({ 'now' : IDL.Int, 'unlockAt' : IDL.Int }),
-    'proposalCapacityReached' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
-      'caller' : IDL.Principal,
-    }),
-    'stakeLockedForVote' : IDL.Record({
-      'lockedStake' : IDL.Nat,
-      'activeStake' : IDL.Nat,
-    }),
-    'invalidConfigAction' : IDL.Null,
-  });
-  const Result_4 = IDL.Variant({
-    'ok' : ProposalReceipt,
-    'err' : ProposalError,
-  });
-  const DaoTotals = IDL.Record({
-    'totalActiveStake' : IDL.Nat,
-    'totalSupply' : IDL.Nat,
-    'totalProposalBonds' : IDL.Nat,
-    'totalPendingUnstake' : IDL.Nat,
-    'totalLiquid' : IDL.Nat,
-    'totalPendingWithdraw' : IDL.Nat,
-  });
-  const ExecuteReceipt = IDL.Record({
-    'id' : IDL.Nat,
-    'configVersion' : IDL.Nat,
-    'applied' : IDL.Bool,
-    'config' : Config,
+  const ExecuteRequest = IDL.Record({ 'quote' : Quote, 'guard' : Guard });
+  const Receipt = IDL.Record({
+    'output' : IDL.Vec(BasketEntry),
+    'executedAt' : IDL.Int,
+    'edgeId' : EdgeId,
+    'fees' : IDL.Vec(BasketEntry),
+    'witness' : IDL.Opt(IDL.Text),
+    'account' : Account,
+    'input' : IDL.Vec(BasketEntry),
+    'positionRemaining' : IDL.Vec(PositionEffect),
+    'positionOutputs' : IDL.Vec(PositionEffect),
+    'positionInputs' : IDL.Vec(PositionEffect),
   });
   const ExecuteError = IDL.Variant({
-    'proposalNotFound' : IDL.Null,
-    'proposalNotPassed' : IDL.Null,
-    'alreadyExecuted' : IDL.Null,
-    'invalidConfigAction' : IDL.Null,
+    'insufficientInput' : IDL.Null,
+    'unknownEdge' : IDL.Null,
+    'accountNotAuthorized' : IDL.Record({
+      'account' : Account,
+      'caller' : IDL.Principal,
+    }),
+    'edgeNotLive' : DiscoveryStatus,
+    'guardRejected' : IDL.Null,
+    'protocolSpecific' : IDL.Text,
+    'quoteReceiptMismatch' : IDL.Null,
+    'expiredQuote' : IDL.Null,
+    'invalidAmount' : IDL.Null,
   });
-  const Result_3 = IDL.Variant({ 'ok' : ExecuteReceipt, 'err' : ExecuteError });
-  const PendingWithdrawal__1 = IDL.Record({
-    'fee' : IDL.Nat,
-    'debitAmount' : IDL.Nat,
-    'createdAtTime' : IDL.Nat,
-    'operationId' : IDL.Nat,
+  const Result_3 = IDL.Variant({ 'ok' : Receipt, 'err' : ExecuteError });
+  const Intent = IDL.Record({
+    'positionId' : IDL.Opt(IDL.Nat),
     'amount' : IDL.Nat,
+    'extension' : IDL.Opt(IDL.Text),
   });
-  const Proposal = IDL.Record({
-    'id' : IDL.Nat,
-    'status' : ProposalStatus,
-    'noVotes' : IDL.Nat,
-    'action' : ConfigAction,
-    'quorumVotes' : IDL.Nat,
-    'yesVotes' : IDL.Nat,
-    'bond' : IDL.Nat,
-    'createdAt' : IDL.Int,
-    'configVersion' : IDL.Nat,
-    'deadline' : IDL.Int,
-    'proposer' : IDL.Text,
-    'snapshotActiveStake' : IDL.Nat,
+  const QuoteRequest = IDL.Record({
+    'edgeId' : EdgeId,
+    'intent' : Intent,
+    'account' : Account,
   });
-  const ProposalWindow = IDL.Record({
-    'nextProposalId' : IDL.Nat,
-    'maxProposals' : IDL.Nat,
-  });
-  const RequestUnstakeReceipt = IDL.Record({
-    'pendingUnstake' : IDL.Nat,
-    'unlockAt' : IDL.Int,
-    'amount' : IDL.Nat,
-    'activeStake' : IDL.Nat,
-  });
-  const Result_2 = IDL.Variant({
-    'ok' : RequestUnstakeReceipt,
-    'err' : UnstakeError,
-  });
-  const BalanceRequest = IDL.Record({ 'subject' : IDL.Principal });
-  const BalanceKey = IDL.Principal;
-  const BalanceEntry = IDL.Tuple(BalanceKey, IDL.Nat);
-  const BalanceReceipt = IDL.Record({
-    'subject' : IDL.Principal,
-    'entries' : IDL.Vec(BalanceEntry),
-  });
-  const Account = IDL.Record({
+  const Result_2 = IDL.Variant({ 'ok' : Quote, 'err' : ExecuteError });
+  const Subaccount = IDL.Vec(IDL.Nat8);
+  const Account__1 = IDL.Record({
     'owner' : IDL.Principal,
-    'subaccount' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'subaccount' : IDL.Opt(Subaccount),
   });
-  const DepositRequest = IDL.Record({
-    'subject' : IDL.Principal,
-    'from' : Account,
-    'ledger' : IDL.Principal,
+  const IcrcDepositRequest = IDL.Record({
+    'from' : Account__1,
+    'ledger' : LedgerId,
+    'account' : Account,
     'amount' : IDL.Nat,
   });
-  const DepositReceipt = IDL.Record({
+  const IcrcDepositReceipt = IDL.Record({
     'txIndex' : IDL.Nat,
-    'subject' : IDL.Principal,
-    'from' : Account,
-    'ledger' : IDL.Principal,
+    'from' : Account__1,
+    'ledger' : LedgerId,
+    'account' : Account,
     'balanceAfter' : IDL.Nat,
     'amount' : IDL.Nat,
   });
@@ -177,38 +194,38 @@ export const idlFactory = ({ IDL }) => {
     'InsufficientFunds' : IDL.Record({ 'balance' : IDL.Nat }),
   });
   const LedgerReject = IDL.Record({ 'message' : IDL.Text });
-  const DepositError = IDL.Variant({
-    'zeroAmount' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
+  const IcrcDepositError = IDL.Variant({
+    'icrcTransferFromErr' : TransferFromError,
+    'accountNotAuthorized' : IDL.Record({
+      'account' : Account,
       'caller' : IDL.Principal,
     }),
-    'ledgerTransferFromErr' : TransferFromError,
-    'ledgerTransferFromRejected' : LedgerReject,
+    'zeroAmount' : IDL.Null,
+    'icrcTransferFromRejected' : LedgerReject,
     'sourceOwnerMismatch' : IDL.Record({
       'caller' : IDL.Principal,
       'fromOwner' : IDL.Principal,
     }),
     'amountTooLow' : IDL.Record({ 'minAmount' : IDL.Nat, 'amount' : IDL.Nat }),
-    'ledgerNotSupported' : IDL.Principal,
+    'ledgerNotSupported' : LedgerId,
   });
-  const Result__1_1 = IDL.Variant({
-    'ok' : DepositReceipt,
-    'err' : DepositError,
+  const Result_1 = IDL.Variant({
+    'ok' : IcrcDepositReceipt,
+    'err' : IcrcDepositError,
   });
-  const WithdrawRequest = IDL.Record({
-    'to' : Account,
-    'subject' : IDL.Principal,
-    'ledger' : IDL.Principal,
+  const IcrcWithdrawRequest = IDL.Record({
+    'to' : Account__1,
+    'ledger' : LedgerId,
+    'account' : Account,
     'amount' : IDL.Nat,
   });
-  const WithdrawReceipt = IDL.Record({
-    'to' : Account,
+  const IcrcWithdrawReceipt = IDL.Record({
+    'to' : Account__1,
     'fee' : IDL.Nat,
     'txIndex' : IDL.Nat,
-    'subject' : IDL.Principal,
     'debitAmount' : IDL.Nat,
-    'ledger' : IDL.Principal,
+    'ledger' : LedgerId,
+    'account' : Account,
     'balanceAfter' : IDL.Nat,
     'amount' : IDL.Nat,
   });
@@ -225,111 +242,57 @@ export const idlFactory = ({ IDL }) => {
     'TooOld' : IDL.Null,
     'InsufficientFunds' : IDL.Record({ 'balance' : IDL.Nat }),
   });
-  const PendingWithdrawal = IDL.Record({
-    'to' : Account,
+  const PendingIcrcWithdrawal = IDL.Record({
+    'to' : Account__1,
     'fee' : IDL.Nat,
-    'subject' : IDL.Principal,
     'debitAmount' : IDL.Nat,
-    'ledger' : IDL.Principal,
+    'ledger' : LedgerId,
+    'account' : Account,
     'amount' : IDL.Nat,
   });
-  const WithdrawError = IDL.Variant({
-    'zeroAmount' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
+  const IcrcWithdrawError = IDL.Variant({
+    'icrcTransferErr' : TransferError,
+    'accountNotAuthorized' : IDL.Record({
+      'account' : Account,
       'caller' : IDL.Principal,
     }),
-    'ledgerTransferErr' : TransferError,
+    'zeroAmount' : IDL.Null,
+    'icrcTransferRejected' : LedgerReject,
     'insufficientLocalBalance' : IDL.Null,
-    'ledgerTransferRejected' : LedgerReject,
-    'ledgerNotSupported' : IDL.Principal,
-    'withdrawInProgress' : PendingWithdrawal,
-    'ledgerFeeRejected' : LedgerReject,
+    'icrcFeeRejected' : LedgerReject,
+    'ledgerNotSupported' : LedgerId,
+    'withdrawInProgress' : PendingIcrcWithdrawal,
   });
-  const Result__1 = IDL.Variant({
-    'ok' : WithdrawReceipt,
-    'err' : WithdrawError,
-  });
-  const StakeReceipt = IDL.Record({
-    'amount' : IDL.Nat,
-    'activeStake' : IDL.Nat,
-    'votingPowerUnlockAt' : IDL.Int,
-    'liquidBalance' : IDL.Nat,
-  });
-  const StakeError = IDL.Variant({
-    'insufficientLiquidBalance' : IDL.Null,
-    'zeroAmount' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
-      'caller' : IDL.Principal,
-    }),
-  });
-  const Result_1 = IDL.Variant({ 'ok' : StakeReceipt, 'err' : StakeError });
-  const StakeInfo = IDL.Record({
-    'pendingWithdraw' : IDL.Nat,
-    'pendingUnstake' : IDL.Nat,
-    'activeVoteLock' : IDL.Nat,
-    'unlockAt' : IDL.Opt(IDL.Int),
-    'proposalBond' : IDL.Nat,
-    'activeStake' : IDL.Nat,
-    'votingPowerUnlockAt' : IDL.Opt(IDL.Int),
-    'liquid' : IDL.Nat,
-  });
-  const VoteChoice = IDL.Variant({ 'no' : IDL.Null, 'yes' : IDL.Null });
-  const VoteReceipt = IDL.Record({
-    'id' : IDL.Nat,
-    'weight' : IDL.Nat,
-    'noVotes' : IDL.Nat,
-    'yesVotes' : IDL.Nat,
-    'voter' : IDL.Principal,
-    'choice' : VoteChoice,
-  });
-  const VoteError = IDL.Variant({
-    'votingPeriodEnded' : IDL.Record({ 'now' : IDL.Int, 'deadline' : IDL.Int }),
-    'proposalNotFound' : IDL.Null,
-    'alreadyVoted' : IDL.Null,
-    'stakeLockActive' : IDL.Record({ 'now' : IDL.Int, 'unlockAt' : IDL.Int }),
-    'proposalNotOpen' : IDL.Null,
-    'subjectNotAuthorized' : IDL.Record({
-      'subject' : IDL.Principal,
-      'caller' : IDL.Principal,
-    }),
-    'noVotingPower' : IDL.Null,
-  });
-  const Result = IDL.Variant({ 'ok' : VoteReceipt, 'err' : VoteError });
-  const VoteInfo = IDL.Record({
-    'voteWeight' : IDL.Nat,
-    'lockedStake' : IDL.Nat,
-    'choice' : IDL.Opt(VoteChoice),
-    'hasVoted' : IDL.Bool,
+  const Result = IDL.Variant({
+    'ok' : IcrcWithdrawReceipt,
+    'err' : IcrcWithdrawError,
   });
   const DaoActorDemo = IDL.Service({
-    'claim_unstaked' : IDL.Func([IDL.Principal], [Result_6], []),
-    'close' : IDL.Func([IDL.Nat], [Result_5], []),
-    'config_version' : IDL.Func([], [IDL.Nat], ['query']),
-    'create_proposal' : IDL.Func([IDL.Principal, ConfigAction], [Result_4], []),
-    'dao_totals' : IDL.Func([], [DaoTotals], ['query']),
-    'execute' : IDL.Func([IDL.Nat], [Result_3], []),
     'governance_ledger' : IDL.Func([], [IDL.Principal], ['query']),
-    'max_proposals' : IDL.Func([], [IDL.Nat], ['query']),
-    'next_proposal_id' : IDL.Func([], [IDL.Nat], ['query']),
-    'pending_withdrawal' : IDL.Func(
-        [IDL.Principal],
-        [IDL.Opt(PendingWithdrawal__1)],
+    'spi_100_account' : IDL.Func(
+        [IDL.Principal, IDL.Nat],
+        [IDL.Opt(Account)],
         ['query'],
       ),
-    'proposal' : IDL.Func([IDL.Nat], [IDL.Opt(Proposal)], ['query']),
-    'proposal_config' : IDL.Func([], [Config], ['query']),
-    'proposal_window' : IDL.Func([], [ProposalWindow], ['query']),
-    'request_unstake' : IDL.Func([IDL.Principal, IDL.Nat], [Result_2], []),
-    'spi_101_balance' : IDL.Func([BalanceRequest], [BalanceReceipt], ['query']),
-    'spi_101_deposit' : IDL.Func([DepositRequest], [Result__1_1], []),
-    'spi_101_withdraw' : IDL.Func([WithdrawRequest], [Result__1], []),
-    'stake' : IDL.Func([IDL.Principal, IDL.Nat], [Result_1], []),
-    'stake_info' : IDL.Func([IDL.Principal], [StakeInfo], ['query']),
-    'vote' : IDL.Func([IDL.Principal, IDL.Nat, VoteChoice], [Result], []),
-    'vote_info' : IDL.Func([IDL.Nat, IDL.Principal], [VoteInfo], ['query']),
-    'voting_power' : IDL.Func([IDL.Principal], [IDL.Nat], ['query']),
+    'spi_101_wallet' : IDL.Func([WalletRequest], [Result_4], ['query']),
+    'spi_102_discover' : IDL.Func([DiscoverRequest], [Discovery], ['query']),
+    'spi_102_execute' : IDL.Func([ExecuteRequest], [Result_3], []),
+    'spi_102_quote' : IDL.Func([QuoteRequest], [Result_2], ['query']),
+    'spi_103_icrc_deposit' : IDL.Func([IcrcDepositRequest], [Result_1], []),
+    'spi_103_icrc_withdraw' : IDL.Func([IcrcWithdrawRequest], [Result], []),
+    'state' : IDL.Func(
+        [Account],
+        [
+          IDL.Record({
+            'active' : IDL.Nat,
+            'pendingUnstake' : IDL.Nat,
+            'unlockAt' : IDL.Int,
+            'pendingWithdrawDebit' : IDL.Nat,
+            'liquid' : IDL.Nat,
+          }),
+        ],
+        ['query'],
+      ),
   });
   return DaoActorDemo;
 };

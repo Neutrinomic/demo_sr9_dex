@@ -1,0 +1,186 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public pure func accountAuthorized(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, caller);
+  {
+    SPI100.belongsToWallet(account, caller)
+  };
+
+  public pure func walletReceiptBindsAccount(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (receipt.account == request.account);
+  {
+    receipt.account == request.account
+  };
+
+  public pure func fungibleEntryNonzero(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.holding) {
+      case (#fungible holding) { holding.amount > 0 };
+      case (#nonfungible(_)) { true }
+    }
+  };
+
+  public pure func nonfungibleEntryHasStableId(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.holding) {
+      case (#fungible(_)) { true };
+      case (#nonfungible(_)) { true }
+    }
+  };
+
+  public pure func displayAssetNotDuplicatedUnlessNull(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.displayAsset) {
+      case null { true };
+      case (?asset) { asset != entry.node }
+    }
+  };
+
+  public pure func statusWellFormed(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.status) {
+      case (#available) { true };
+      case (#locked(_)) { true };
+      case (#pending(_)) { true }
+    }
+  };
+
+  public pure func walletEntryWellFormed(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    fungibleEntryNonzero(entry) and
+      nonfungibleEntryHasStableId(entry) and
+      displayAssetNotDuplicatedUnlessNull(entry) and
+      statusWellFormed(entry)
+  };
+
+  public pure func walletReceiptWellFormed(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == walletReceiptBindsAccount(request, receipt);
+  {
+    walletReceiptBindsAccount(request, receipt)
+  };
+
+  public pure func accountExists(account : SPI100.Account) : Bool
+    requires true;
+    ensures result == (SPI100.decode(account) != null);
+  {
+    SPI100.decode(account) != null
+  };
+
+  public pure func callerControlsAccount(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, caller);
+  {
+    SPI100.belongsToWallet(account, caller)
+  };
+
+  public pure func callerCanViewAccount(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == (accountExists(account) and callerControlsAccount(caller, account));
+  {
+    accountExists(account) and callerControlsAccount(caller, account)
+  };
+
+  public pure func filterAccepted(filter : ?Text) : Bool
+    requires true;
+    ensures result == (switch (filter) {
+      case null { true };
+      case (?text) { text == "all" }
+    });
+  {
+    switch (filter) {
+      case null { true };
+      case (?text) { text == "all" }
+    }
+  };
+
+  public pure func cursorValid(cursor : ?Nat) : Bool
+    requires true;
+    ensures true;
+  {
+    switch (cursor) {
+      case null { true };
+      case (?_) { true }
+    }
+  };
+
+  public pure func nextCursorMonotonic(cursor : ?Nat, nextCursor : ?Nat) : Bool
+    requires true;
+    ensures result == (switch (cursor, nextCursor) {
+      case (null, null) { true };
+      case (null, (?n)) { n > 0 };
+      case ((?_c), null) { true };
+      case ((?c), (?n)) { n > c }
+    });
+  {
+    switch (cursor, nextCursor) {
+      case (null, null) { true };
+      case (null, (?n)) { n > 0 };
+      case ((?_c), null) { true };
+      case ((?c), (?n)) { n > c }
+    }
+  };
+
+  public pure func walletReturned(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountAuthorized(caller, request.account) and
+        filterAccepted(request.filter) and
+        cursorValid(request.cursor) and
+        walletReceiptWellFormed(request, receipt) and
+        nextCursorMonotonic(request.cursor, receipt.nextCursor)
+    );
+  {
+    accountAuthorized(caller, request.account) and
+      filterAccepted(request.filter) and
+      cursorValid(request.cursor) and
+      walletReceiptWellFormed(request, receipt) and
+      nextCursorMonotonic(request.cursor, receipt.nextCursor)
+  };
+
+  public lemma walletReturnedImpliesAuthorized(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures accountAuthorized(caller, request.account);
+  {};
+
+  public lemma walletReturnedImpliesAccountBinding(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures walletReceiptBindsAccount(request, receipt);
+  {};
+
+  public lemma walletReturnedImpliesCursorProgress(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures nextCursorMonotonic(request.cursor, receipt.nextCursor);
+  {};
+}

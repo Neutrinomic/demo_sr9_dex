@@ -1,0 +1,204 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public pure func accountExists(account : SPI100.Account) : Bool
+    requires true;
+    ensures result == (SPI100.decode(account) != null);
+  {
+    SPI100.decode(account) != null
+  };
+
+  public pure func callerControlsAccount(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, caller);
+  {
+    SPI100.belongsToWallet(account, caller)
+  };
+
+  public pure func callerCanViewAccount(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == (accountExists(account) and callerControlsAccount(caller, account));
+  {
+    accountExists(account) and callerControlsAccount(caller, account)
+  };
+
+  public pure func filterAccepted(filter : ?Text) : Bool
+    requires true;
+    ensures result == (switch (filter) {
+      case null { true };
+      case (?text) { text == "all" }
+    });
+  {
+    switch (filter) {
+      case null { true };
+      case (?text) { text == "all" }
+    }
+  };
+
+  public pure func cursorValid(cursor : ?Nat) : Bool
+    requires true;
+    ensures result == (switch (cursor) {
+      case null { true };
+      case (?n) { n == 0 or n == 2 or n == 4 }
+    });
+  {
+    switch (cursor) {
+      case null { true };
+      case (?n) { n == 0 or n == 2 or n == 4 }
+    }
+  };
+
+  public pure func pageBindsAccount(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (receipt.account == request.account);
+  {
+    receipt.account == request.account
+  };
+
+  public pure func nextCursorMonotonic(cursor : ?Nat, nextCursor : ?Nat) : Bool
+    requires true;
+    ensures result == (switch (cursor, nextCursor) {
+      case (null, null) { true };
+      case (null, (?n)) { n > 0 };
+      case ((?_c), null) { true };
+      case ((?c), (?n)) { n > c }
+    });
+  {
+    switch (cursor, nextCursor) {
+      case (null, null) { true };
+      case (null, (?n)) { n > 0 };
+      case ((?_c), null) { true };
+      case ((?c), (?n)) { n > c }
+    }
+  };
+
+  public pure func pageStart(cursor : ?Nat) : Nat
+    requires true;
+    ensures result == (switch (cursor) {
+      case null { 0 };
+      case (?0) { 0 };
+      case (?2) { 2 };
+      case (?4) { 4 };
+      case (?_) { 0 }
+    });
+  {
+    switch (cursor) {
+      case null { 0 };
+      case (?0) { 0 };
+      case (?2) { 2 };
+      case (?4) { 4 };
+      case (?_) { 0 }
+    }
+  };
+
+  public pure func pageEndExclusive(cursor : ?Nat) : Nat
+    requires true;
+    ensures result == (switch (cursor) {
+      case null { 2 };
+      case (?0) { 2 };
+      case (?2) { 4 };
+      case (?4) { 5 };
+      case (?_) { 0 }
+    });
+  {
+    switch (cursor) {
+      case null { 2 };
+      case (?0) { 2 };
+      case (?2) { 4 };
+      case (?4) { 5 };
+      case (?_) { 0 }
+    }
+  };
+
+  public pure func pageRangeValid(cursor : ?Nat) : Bool
+    requires true;
+    ensures result == (
+      pageStart(cursor) < pageEndExclusive(cursor) and
+        pageEndExclusive(cursor) <= 5
+    );
+  {
+    pageStart(cursor) < pageEndExclusive(cursor) and
+      pageEndExclusive(cursor) <= 5
+  };
+
+  public pure func pageHasNoDuplicateIndices(cursor : ?Nat) : Bool
+    requires true;
+    ensures result == pageRangeValid(cursor);
+  {
+    pageRangeValid(cursor)
+  };
+
+  public pure func adjacentPagesDisjoint(cursor : ?Nat, nextCursor : ?Nat) : Bool
+    requires true;
+    ensures result == (
+      switch (nextCursor) {
+        case null { true };
+        case (?_) { pageEndExclusive(cursor) <= pageStart(nextCursor) }
+      }
+    );
+  {
+    switch (nextCursor) {
+      case null { true };
+      case (?_) { pageEndExclusive(cursor) <= pageStart(nextCursor) }
+    }
+  };
+
+  public pure func completeScanHasNoDuplicateIndices() : Bool
+    requires true;
+    ensures result;
+  {
+    pageHasNoDuplicateIndices(null) and
+      pageHasNoDuplicateIndices(?2) and
+      pageHasNoDuplicateIndices(?4) and
+      adjacentPagesDisjoint(null, ?2) and
+      adjacentPagesDisjoint(?2, ?4) and
+      adjacentPagesDisjoint(?4, null)
+  };
+
+  public pure func pageReturned(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      callerCanViewAccount(caller, request.account) and
+        filterAccepted(request.filter) and
+        cursorValid(request.cursor) and
+        pageBindsAccount(request, receipt) and
+        nextCursorMonotonic(request.cursor, receipt.nextCursor) and
+        pageHasNoDuplicateIndices(request.cursor) and
+        adjacentPagesDisjoint(request.cursor, receipt.nextCursor)
+    );
+  {
+    callerCanViewAccount(caller, request.account) and
+      filterAccepted(request.filter) and
+      cursorValid(request.cursor) and
+      pageBindsAccount(request, receipt) and
+      nextCursorMonotonic(request.cursor, receipt.nextCursor) and
+      pageHasNoDuplicateIndices(request.cursor) and
+      adjacentPagesDisjoint(request.cursor, receipt.nextCursor)
+  };
+
+  public lemma pageReturnedImpliesAccountBinding(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires pageReturned(caller, request, receipt);
+    ensures receipt.account == request.account;
+  {};
+
+  public lemma pageReturnedImpliesNoDuplicatePageIndices(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires pageReturned(caller, request, receipt);
+    ensures pageHasNoDuplicateIndices(request.cursor);
+  {};
+}

@@ -1,93 +1,41 @@
-type WithdrawRequest = 
+type WalletRequest = 
  record {
-   amount: nat;
-   ledger: principal;
-   subject: principal;
-   to: Account;
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
  };
-type WithdrawReceipt = 
+type WalletReceipt = 
  record {
-   amount: nat;
-   balanceAfter: nat;
-   debitAmount: nat;
-   fee: nat;
-   ledger: principal;
-   subject: principal;
-   to: Account;
-   txIndex: nat;
+   account: Account;
+   entries: vec WalletEntry;
+   nextCursor: opt nat;
+   witness: opt text;
  };
-type WithdrawError = 
+type WalletHolding = 
  variant {
-   insufficientLocalBalance;
-   ledgerFeeRejected: LedgerReject;
-   ledgerNotSupported: principal;
-   ledgerTransferErr: TransferError;
-   ledgerTransferRejected: LedgerReject;
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
-   withdrawInProgress: PendingWithdrawal;
-   zeroAmount;
+   fungible: record {
+               amount: nat;
+               meta: NoMetadata;
+             };
+   nonfungible: record {
+                  id: nat;
+                  meta: NoMetadata;
+                };
  };
-type VoteReceipt = 
+type WalletError = variant {
+                     accountNotAuthorized:
+                      record {
+                        account: Account;
+                        caller: principal;
+                      };};
+type WalletEntry = 
  record {
-   choice: VoteChoice;
-   id: nat;
-   noVotes: nat;
-   voter: principal;
-   weight: nat;
-   yesVotes: nat;
- };
-type VoteInfo = 
- record {
-   choice: opt VoteChoice;
-   hasVoted: bool;
-   lockedStake: nat;
-   voteWeight: nat;
- };
-type VoteError = 
- variant {
-   alreadyVoted;
-   noVotingPower;
-   proposalNotFound;
-   proposalNotOpen;
-   stakeLockActive: record {
-                      now: int;
-                      unlockAt: int;
-                    };
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
-   votingPeriodEnded: record {
-                        deadline: int;
-                        now: int;
-                      };
- };
-type VoteChoice = 
- variant {
-   no;
-   yes;
- };
-type UnstakeError = 
- variant {
-   cooldownActive: record {
-                     now: int;
-                     unlockAt: int;
-                   };
-   insufficientActiveStake;
-   noPendingUnstake;
-   stakeLockedForVote: record {
-                         activeStake: nat;
-                         lockedStake: nat;
-                       };
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
-   unstakeAlreadyPending;
-   zeroAmount;
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   holding: WalletHolding;
+   node: NodeId;
+   status: HoldingStatus;
  };
 type TransferFromError = 
  variant {
@@ -118,290 +66,285 @@ type TransferError =
    TemporarilyUnavailable;
    TooOld;
  };
-type StakeReceipt = 
- record {
-   activeStake: nat;
-   amount: nat;
-   liquidBalance: nat;
-   votingPowerUnlockAt: int;
- };
-type StakeInfo = 
- record {
-   activeStake: nat;
-   activeVoteLock: nat;
-   liquid: nat;
-   pendingUnstake: nat;
-   pendingWithdraw: nat;
-   proposalBond: nat;
-   unlockAt: opt int;
-   votingPowerUnlockAt: opt int;
- };
-type StakeError = 
- variant {
-   insufficientLiquidBalance;
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
-   zeroAmount;
- };
-type Result__1_1 = 
- variant {
-   err: DepositError;
-   ok: DepositReceipt;
- };
-type Result__1 = 
- variant {
-   err: WithdrawError;
-   ok: WithdrawReceipt;
- };
-type Result_6 = 
- variant {
-   err: UnstakeError;
-   ok: ClaimUnstakeReceipt;
- };
-type Result_5 = 
- variant {
-   err: CloseError;
-   ok: CloseReceipt;
- };
+type Subaccount = blob;
 type Result_4 = 
  variant {
-   err: ProposalError;
-   ok: ProposalReceipt;
+   err: WalletError;
+   ok: WalletReceipt;
  };
 type Result_3 = 
  variant {
    err: ExecuteError;
-   ok: ExecuteReceipt;
+   ok: Receipt;
  };
 type Result_2 = 
  variant {
-   err: UnstakeError;
-   ok: RequestUnstakeReceipt;
+   err: ExecuteError;
+   ok: Quote;
  };
 type Result_1 = 
  variant {
-   err: StakeError;
-   ok: StakeReceipt;
+   err: IcrcDepositError;
+   ok: IcrcDepositReceipt;
  };
 type Result = 
  variant {
-   err: VoteError;
-   ok: VoteReceipt;
+   err: IcrcWithdrawError;
+   ok: IcrcWithdrawReceipt;
  };
-type RequestUnstakeReceipt = 
+type Receipt = 
  record {
-   activeStake: nat;
-   amount: nat;
-   pendingUnstake: nat;
-   unlockAt: int;
+   account: Account;
+   edgeId: EdgeId;
+   executedAt: int;
+   fees: vec BasketEntry;
+   input: vec BasketEntry;
+   output: vec BasketEntry;
+   positionInputs: vec PositionEffect;
+   positionOutputs: vec PositionEffect;
+   positionRemaining: vec PositionEffect;
+   witness: opt text;
  };
-type ProposalWindow = 
+type QuoteRequest = 
  record {
-   maxProposals: nat;
-   nextProposalId: nat;
+   account: Account;
+   edgeId: EdgeId;
+   intent: Intent;
  };
-type ProposalStatus = 
- variant {
-   executed;
-   failed;
-   open;
-   passed;
-   stale;
- };
-type ProposalReceipt = 
+type Quote = 
  record {
-   configVersion: nat;
-   createdAt: int;
-   deadline: int;
-   id: nat;
-   proposer: principal;
-   quorumVotes: nat;
-   snapshotActiveStake: nat;
+   account: Account;
+   edgeId: EdgeId;
+   expiresAt: opt int;
+   fees: vec BasketEntry;
+   input: vec BasketEntry;
+   output: vec BasketEntry;
+   positionInputs: vec PositionEffect;
+   positionOutputs: vec PositionEffect;
+   preconditions: opt text;
+   witness: opt text;
  };
-type ProposalError = 
- variant {
-   invalidConfigAction;
-   proposalCapacityReached;
-   proposalThresholdNotMet;
-   stakeLockActive: record {
-                      now: int;
-                      unlockAt: int;
-                    };
-   stakeLockedForVote: record {
-                         activeStake: nat;
-                         lockedStake: nat;
-                       };
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
- };
-type Proposal = 
- record {
-   action: ConfigAction;
-   bond: nat;
-   configVersion: nat;
-   createdAt: int;
-   deadline: int;
-   id: nat;
-   noVotes: nat;
-   proposer: text;
-   quorumVotes: nat;
-   snapshotActiveStake: nat;
-   status: ProposalStatus;
-   yesVotes: nat;
- };
-type PendingWithdrawal__1 = 
+type PositionEffect = 
  record {
    amount: nat;
-   createdAtTime: nat;
-   debitAmount: nat;
-   fee: nat;
-   operationId: nat;
+   metadata: opt text;
+   node: NodeId;
+   positionId: opt nat;
+   unlockAt: opt int;
  };
-type PendingWithdrawal = 
+type PendingIcrcWithdrawal = 
  record {
+   account: Account;
    amount: nat;
    debitAmount: nat;
    fee: nat;
-   ledger: principal;
-   subject: principal;
-   to: Account;
+   ledger: LedgerId;
+   to: Account__1;
  };
+type NodeShape = 
+ record {
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   form: NodeForm;
+   nodeId: NodeId;
+   risk: opt text;
+ };
+type NodeId = 
+ variant {
+   ledger: LedgerId;
+   local: blob;
+ };
+type NodeForm = 
+ variant {
+   fungible;
+   nonfungible;
+ };
+type NoMetadata = null;
 type LedgerReject = record {message: text;};
-type ExecuteReceipt = 
- record {
-   applied: bool;
-   config: Config;
-   configVersion: nat;
-   id: nat;
- };
-type ExecuteError = 
- variant {
-   alreadyExecuted;
-   invalidConfigAction;
-   proposalNotFound;
-   proposalNotPassed;
- };
-type DepositRequest = 
+type LedgerId = principal;
+type Intent = 
  record {
    amount: nat;
-   from: Account;
-   ledger: principal;
-   subject: principal;
+   extension: opt text;
+   positionId: opt nat;
  };
-type DepositReceipt = 
+type IcrcWithdrawRequest = 
  record {
+   account: Account;
+   amount: nat;
+   ledger: LedgerId;
+   to: Account__1;
+ };
+type IcrcWithdrawReceipt = 
+ record {
+   account: Account;
    amount: nat;
    balanceAfter: nat;
-   from: Account;
-   ledger: principal;
-   subject: principal;
+   debitAmount: nat;
+   fee: nat;
+   ledger: LedgerId;
+   to: Account__1;
    txIndex: nat;
  };
-type DepositError = 
+type IcrcWithdrawError = 
  variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
+   icrcFeeRejected: LedgerReject;
+   icrcTransferErr: TransferError;
+   icrcTransferRejected: LedgerReject;
+   insufficientLocalBalance;
+   ledgerNotSupported: LedgerId;
+   withdrawInProgress: PendingIcrcWithdrawal;
+   zeroAmount;
+ };
+type IcrcDepositRequest = 
+ record {
+   account: Account;
+   amount: nat;
+   from: Account__1;
+   ledger: LedgerId;
+ };
+type IcrcDepositReceipt = 
+ record {
+   account: Account;
+   amount: nat;
+   balanceAfter: nat;
+   from: Account__1;
+   ledger: LedgerId;
+   txIndex: nat;
+ };
+type IcrcDepositError = 
+ variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
    amountTooLow: record {
                    amount: nat;
                    minAmount: nat;
                  };
-   ledgerNotSupported: principal;
-   ledgerTransferFromErr: TransferFromError;
-   ledgerTransferFromRejected: LedgerReject;
+   icrcTransferFromErr: TransferFromError;
+   icrcTransferFromRejected: LedgerReject;
+   ledgerNotSupported: LedgerId;
    sourceOwnerMismatch: record {
                           caller: principal;
                           fromOwner: principal;
                         };
-   subjectNotAuthorized: record {
-                           caller: principal;
-                           subject: principal;
-                         };
    zeroAmount;
  };
-type DaoTotals = 
+type HoldingStatus = 
+ variant {
+   available;
+   locked: record {unlockAt: opt int;};
+   pending: record {unlockAt: opt int;};
+ };
+type Guard = 
  record {
-   totalActiveStake: nat;
-   totalLiquid: nat;
-   totalPendingUnstake: nat;
-   totalPendingWithdraw: nat;
-   totalProposalBonds: nat;
-   totalSupply: nat;
+   deadline: opt int;
+   extension: opt text;
+   maxDebt: opt nat;
+   maxFee: vec BasketEntry;
+   maxPriceImpact: opt nat;
+   maxSpend: vec BasketEntry;
+   minHealth: opt nat;
+   minReceive: vec BasketEntry;
+   minShares: opt nat;
+ };
+type ExecuteRequest = 
+ record {
+   guard: Guard;
+   quote: Quote;
+ };
+type ExecuteError = 
+ variant {
+   accountNotAuthorized: record {
+                           account: Account;
+                           caller: principal;
+                         };
+   edgeNotLive: DiscoveryStatus;
+   expiredQuote;
+   guardRejected;
+   insufficientInput;
+   invalidAmount;
+   protocolSpecific: text;
+   quoteReceiptMismatch;
+   unknownEdge;
+ };
+type EdgeShape = 
+ record {
+   displayLabel: opt text;
+   edgeId: EdgeId;
+   inputNodes: vec NodeId;
+   outputNodes: vec NodeId;
+   risk: opt text;
+ };
+type EdgeId = 
+ record {
+   id: nat;
+   namespace: text;
+   scope: CanisterId;
+ };
+type DiscoveryStatus = 
+ variant {
+   insufficientInput;
+   live;
+   notMature: record {unlockAt: int;};
+   paused;
+   protocolSpecific: text;
+   unauthorized;
+ };
+type DiscoveryEdge = 
+ record {
+   edge: EdgeShape;
+   status: DiscoveryStatus;
+ };
+type Discovery = 
+ record {
+   account: Account;
+   edges: vec DiscoveryEdge;
+   nextCursor: opt nat;
+   nodes: vec NodeShape;
+   witness: opt text;
+ };
+type DiscoverRequest = 
+ record {
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
  };
 type DaoActorDemo = 
  service {
-   claim_unstaked: (subject: principal) -> (Result_6);
-   close: (id: nat) -> (Result_5);
-   config_version: () -> (nat) query;
-   create_proposal: (subject: principal, action: ConfigAction) -> (Result_4);
-   dao_totals: () -> (DaoTotals) query;
-   execute: (id: nat) -> (Result_3);
    governance_ledger: () -> (principal) query;
-   max_proposals: () -> (nat) query;
-   next_proposal_id: () -> (nat) query;
-   pending_withdrawal: (user: principal) -> (opt PendingWithdrawal__1) query;
-   proposal: (id: nat) -> (opt Proposal) query;
-   proposal_config: () -> (Config) query;
-   proposal_window: () -> (ProposalWindow) query;
-   request_unstake: (subject: principal, amount: nat) -> (Result_2);
-   spi_101_balance: (request: BalanceRequest) -> (BalanceReceipt) query;
-   spi_101_deposit: (request: DepositRequest) -> (Result__1_1);
-   spi_101_withdraw: (request: WithdrawRequest) -> (Result__1);
-   stake: (subject: principal, amount: nat) -> (Result_1);
-   stake_info: (user: principal) -> (StakeInfo) query;
-   vote: (subject: principal, id: nat, choice: VoteChoice) -> (Result);
-   vote_info: (id: nat, user: principal) -> (VoteInfo) query;
-   voting_power: (user: principal) -> (nat) query;
+   spi_100_account: (wallet: principal, id: nat) -> (opt Account) query;
+   spi_101_wallet: (request: WalletRequest) -> (Result_4) query;
+   spi_102_discover: (request: DiscoverRequest) -> (Discovery) query;
+   spi_102_execute: (request: ExecuteRequest) -> (Result_3);
+   spi_102_quote: (request: QuoteRequest) -> (Result_2) query;
+   spi_103_icrc_deposit: (request: IcrcDepositRequest) -> (Result_1);
+   spi_103_icrc_withdraw: (request: IcrcWithdrawRequest) -> (Result);
+   state: (account: Account) ->
+    (record {
+       active: nat;
+       liquid: nat;
+       pendingUnstake: nat;
+       pendingWithdrawDebit: nat;
+       unlockAt: int;
+     }) query;
  };
-type ConfigAction = 
- variant {
-   setConfig: Config;
-   setProposalThreshold: nat;
-   setQuorum: nat;
- };
-type Config = 
- record {
-   proposalThreshold: nat;
-   quorumVotes: nat;
- };
-type CloseReceipt = 
- record {
-   id: nat;
-   noVotes: nat;
-   quorumVotes: nat;
-   status: ProposalStatus;
-   yesVotes: nat;
- };
-type CloseError = 
- variant {
-   proposalNotFound;
-   proposalNotOpen;
-   votingPeriodActive: record {
-                         deadline: int;
-                         now: int;
-                       };
- };
-type ClaimUnstakeReceipt = 
+type CanisterId = principal;
+type BasketEntry = 
  record {
    amount: nat;
-   liquidBalance: nat;
+   node: NodeId;
  };
-type BalanceRequest = record {subject: principal;};
-type BalanceReceipt = 
- record {
-   entries: vec BalanceEntry;
-   subject: principal;
- };
-type BalanceKey = principal;
-type BalanceEntry = 
- record {
-   BalanceKey;
-   nat;
- };
-type Account = 
+type Account__1 = 
  record {
    owner: principal;
-   subaccount: opt blob;
+   subaccount: opt Subaccount;
  };
-service : (governanceLedger: principal, initialQuorumVotes: nat, initialProposalThreshold: nat) -> DaoActorDemo
+type Account = blob;
+service : (governanceLedger: principal, _initialQuorumVotes: nat, _initialProposalThreshold: nat) -> DaoActorDemo

@@ -1,0 +1,58 @@
+import ICRCLedger "mo:core/pattern/ICRCLedger";
+import Runtime "mo:core/Runtime";
+import SPI101 "mo:spi/101/DepositWithdrawBalance";
+import SPI101Adapter "./SPI101Adapter";
+import VirtualPrincipal "mo:spi/100/VirtualPrincipal";
+
+module {
+  public func depositTransferFromArgs(
+    request : SPI101.DepositRequest
+  ) : ICRCLedger.TransferFromArgs
+    requires true;
+    ensures result.to.owner == Runtime.selfId();
+    ensures result.to.subaccount == null;
+    ensures result.fee == null;
+    ensures result.spender_subaccount == null;
+    ensures result.from == request.from;
+    ensures result.memo == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == request.amount;
+  {
+    SPI101Adapter.transferFromArgs(Runtime.selfId(), request)
+  };
+
+  public func poolSharePrincipal(poolId : Nat) : ?Principal
+    requires true;
+  {
+    VirtualPrincipal.encode(Runtime.selfId(), poolId)
+  };
+
+  public pure func returnLedgerTransferArgs(
+    pending : {
+      ledger : Principal;
+      user : Principal;
+      localBalance : Nat;
+      fee : Nat;
+      returnedAmount : Nat;
+      balanceKey : Text
+    }
+  ) : ICRCLedger.TransferArg
+    requires pending.returnedAmount + pending.fee == pending.localBalance;
+    ensures result.to.owner == pending.user;
+    ensures result.to.subaccount == null;
+    ensures result.fee == ?pending.fee;
+    ensures result.memo == null;
+    ensures result.from_subaccount == null;
+    ensures result.created_at_time == null;
+    ensures result.amount == pending.returnedAmount;
+  {
+    {
+      to = { owner = pending.user; subaccount = null };
+      fee = ?pending.fee;
+      memo = null;
+      from_subaccount = null;
+      created_at_time = null;
+      amount = pending.returnedAmount
+    }
+  };
+}

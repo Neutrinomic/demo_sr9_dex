@@ -1,0 +1,24 @@
+{
+  "workspaceRoot": "../../../..",
+  "actorFixturesDir": "fixtures/actors",
+  "defaultActor": "operationBridge",
+  "test": {
+    "specGlob": "spec/**/*.test.ts",
+    "timeoutMs": 240000,
+    "reportsDir": "reports",
+    "exceptionsFile": "exceptions.ts"
+  },
+  "actors": {
+    "operationBridge": {
+      "name": "OperationIdBridgeActor",
+      "source": "../examples/OperationIdBridgeActor.sr9",
+      "cycles": "10000000000000",
+      "compileFlags": ["--legacy-persistence", "--legacy-actors"],
+      "packages": [
+        { "name": "core", "path": "core/src", "env": "CORE_PACKAGE_PATH", "findUp": true, "bundledFallback": true },
+        { "name": "spi", "path": "spi", "env": "SPI_PACKAGE_PATH", "findUp": true }
+      ]
+    }
+  }
+}
+

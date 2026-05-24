@@ -1,0 +1,240 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import AccountLedgerBook "mo:spi/research/103_alt_c_operation_id/examples/AccountLedgerBook";
+import Kernel "mo:spi/research/103_alt_c_operation_id/Kernel";
+import OperationBook "mo:spi/research/103_alt_c_operation_id/examples/OperationBook";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+import SPI103 "mo:spi/103/ICRCBridge";
+import Types "mo:spi/research/103_alt_c_operation_id/Types";
+
+persistent actor class OperationIdBridgeActor(
+  supportedLedger : Principal,
+  minDeposit : Nat,
+  withdrawFee : Nat
+) {
+  public type Result<Ok, Err> = SPI101.Result<Ok, Err>;
+
+  var balances : AccountLedgerBook.AccountLedgerBook = AccountLedgerBook.empty();
+  var operations : OperationBook.OperationBook = OperationBook.empty();
+
+  invariant AccountLedgerBook.ordered(balances);
+  invariant OperationBook.ordered(operations);
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared({ caller }) func spi_103_icrc_deposit_with_id(
+    request : Types.DepositWithIdRequest
+  ) : async Result<SPI103.IcrcDepositReceipt, SPI103.IcrcDepositError>
+    reads supportedLedger, minDeposit
+    modifies balances, operations
+    ensures AccountLedgerBook.ordered(balances);
+    ensures OperationBook.ordered(operations);
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.depositReceiptBindsRequest(request.request, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    switch (OperationBook.get(operations, request.operationId)) {
+      case (?#depositOk receipt) {
+        if (not Kernel.depositReceiptBindsRequest(request.request, receipt)) {
+          return #err(#icrcTransferFromRejected({ message = "operation id request mismatch" }))
+        };
+        let before = AccountLedgerBook.balance(balances, receipt.account, receipt.ledger);
+        let after = AccountLedgerBook.balance(balances, receipt.account, receipt.ledger);
+        assert Kernel.noDoubleCreditOnDuplicate(before, after);
+        assert Kernel.depositReceiptBindsRequest(request.request, receipt);
+        return #ok(receipt)
+      };
+      case (?#reconciliationNeeded(_)) {
+        return #err(#icrcTransferFromRejected({ message = "operation needs reconciliation" }))
+      };
+      case (?_) {
+        return #err(#icrcTransferFromRejected({ message = "operation id used by another operation kind" }))
+      };
+      case null {}
+    };
+    if (request.operationId == 0) {
+      return #err(#icrcTransferFromRejected({ message = "invalid operation id" }))
+    };
+    if (request.request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.request.amount < minDeposit) {
+      return #err(#amountTooLow({
+        amount = request.request.amount;
+        minAmount = minDeposit
+      }))
+    };
+    if (request.request.ledger != supportedLedger) {
+      return #err(#ledgerNotSupported(request.request.ledger))
+    };
+    if (not authorized(caller, request.request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.request.account
+      }))
+    };
+    if (request.request.from.owner != caller) {
+      return #err(#sourceOwnerMismatch({
+        caller = caller;
+        fromOwner = request.request.from.owner
+      }))
+    };
+    assert Kernel.canStartDepositWithId(caller, supportedLedger, minDeposit, request);
+    balances := AccountLedgerBook.credit(
+      balances,
+      request.request.account,
+      request.request.ledger,
+      request.request.amount
+    );
+    let nextBalance = AccountLedgerBook.balance(balances, request.request.account, request.request.ledger);
+    let receipt : SPI103.IcrcDepositReceipt = {
+      account = request.request.account;
+      ledger = request.request.ledger;
+      from = request.request.from;
+      amount = request.request.amount;
+      txIndex = request.operationId;
+      balanceAfter = nextBalance
+    };
+    assert Kernel.depositReceiptBindsRequest(request.request, receipt);
+    operations := OperationBook.put(operations, request.operationId, #depositOk(receipt));
+    #ok(receipt)
+  };
+
+  public shared({ caller }) func spi_103_icrc_withdraw_with_id(
+    request : Types.WithdrawWithIdRequest
+  ) : async Result<SPI103.IcrcWithdrawReceipt, SPI103.IcrcWithdrawError>
+    reads supportedLedger, withdrawFee
+    modifies balances, operations
+    ensures AccountLedgerBook.ordered(balances);
+    ensures OperationBook.ordered(operations);
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.withdrawReceiptBindsRequest(request.request, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    switch (OperationBook.get(operations, request.operationId)) {
+      case (?#withdrawOk receipt) {
+        if (not Kernel.withdrawReceiptBindsRequest(request.request, receipt)) {
+          return #err(#icrcTransferRejected({ message = "operation id request mismatch" }))
+        };
+        let before = AccountLedgerBook.balance(balances, receipt.account, receipt.ledger);
+        let after = AccountLedgerBook.balance(balances, receipt.account, receipt.ledger);
+        assert Kernel.noDoubleDebitOnDuplicate(before, after);
+        assert Kernel.withdrawReceiptBindsRequest(request.request, receipt);
+        return #ok(receipt)
+      };
+      case (?#reconciliationNeeded(_)) {
+        return #err(#icrcTransferRejected({ message = "operation needs reconciliation" }))
+      };
+      case (?_) {
+        return #err(#icrcTransferRejected({ message = "operation id used by another operation kind" }))
+      };
+      case null {}
+    };
+    if (request.operationId == 0) {
+      return #err(#icrcTransferRejected({ message = "invalid operation id" }))
+    };
+    if (request.request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.request.ledger != supportedLedger) {
+      return #err(#ledgerNotSupported(request.request.ledger))
+    };
+    if (not authorized(caller, request.request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.request.account
+      }))
+    };
+    assert Kernel.canStartWithdrawWithId(caller, supportedLedger, request);
+    let debitAmount = request.request.amount + withdrawFee;
+    switch (AccountLedgerBook.debit(
+      balances,
+      request.request.account,
+      request.request.ledger,
+      debitAmount
+    )) {
+      case null { #err(#insufficientLocalBalance) };
+      case (?next) {
+        balances := next;
+        let nextBalance = AccountLedgerBook.balance(balances, request.request.account, request.request.ledger);
+        let receipt : SPI103.IcrcWithdrawReceipt = {
+          account = request.request.account;
+          ledger = request.request.ledger;
+          to = request.request.to;
+          amount = request.request.amount;
+          fee = withdrawFee;
+          debitAmount = debitAmount;
+          txIndex = request.operationId;
+          balanceAfter = nextBalance
+        };
+        assert Kernel.withdrawReceiptBindsRequest(request.request, receipt);
+        operations := OperationBook.put(operations, request.operationId, #withdrawOk(receipt));
+        #ok(receipt)
+      }
+    }
+  };
+
+  public shared query func spi_103_operation_status(
+    operationId : Types.OperationId
+  ) : async ?Types.OperationStatus
+    reads operations
+  {
+    OperationBook.get(operations, operationId)
+  };
+
+  public shared({ caller }) func setup_mark_reconciliation(
+    account : AccountCodec.Account,
+    operationId : Types.OperationId,
+    reason : Text
+  ) : async ()
+    modifies operations
+    ensures OperationBook.ordered(operations);
+  {
+    if (authorized(caller, account)) {
+      operations := OperationBook.put(
+        operations,
+        operationId,
+        #reconciliationNeeded({
+          account = account;
+          operationId = operationId;
+          reason = reason
+        })
+      )
+    }
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : SPI101.WalletRequest
+  ) : async Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads supportedLedger, balances
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    let amount = AccountLedgerBook.balance(balances, request.account, supportedLedger);
+    if (amount == 0) {
+      #ok(SPI101.walletReceipt(request.account, []))
+    } else {
+      #ok(SPI101.walletReceipt(
+        request.account,
+        [SPI101.externalLedgerWalletEntry(supportedLedger, amount, ?"Supported ICRC ledger")]
+      ))
+    }
+  }
+}

@@ -1,0 +1,159 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI103 "mo:spi/103/ICRCBridge";
+import Types "mo:spi/research/103_alt_c_operation_id/Types";
+
+module {
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func operationIdValid(operationId : Types.OperationId) : Bool
+    requires true;
+    ensures result == (operationId > 0);
+  {
+    operationId > 0
+  };
+
+  public pure func depositReceiptBindsRequest(
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == request.account and
+        receipt.ledger == request.ledger and
+        receipt.from == request.from and
+        receipt.amount == request.amount
+    );
+  {
+    receipt.account == request.account and
+      receipt.ledger == request.ledger and
+      receipt.from == request.from and
+      receipt.amount == request.amount
+  };
+
+  public pure func withdrawReceiptBindsRequest(
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == request.account and
+        receipt.ledger == request.ledger and
+        receipt.to == request.to and
+        receipt.amount == request.amount
+    );
+  {
+    receipt.account == request.account and
+      receipt.ledger == request.ledger and
+      receipt.to == request.to and
+      receipt.amount == request.amount
+  };
+
+  public pure func canStartDepositWithId(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : Types.DepositWithIdRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      operationIdValid(request.operationId) and
+        accountBelongsToWallet(request.request.account, caller) and
+        request.request.ledger == supportedLedger and
+        request.request.amount > 0 and
+        request.request.amount >= minDeposit and
+        request.request.from.owner == caller
+    );
+  {
+    operationIdValid(request.operationId) and
+      accountBelongsToWallet(request.request.account, caller) and
+      request.request.ledger == supportedLedger and
+      request.request.amount > 0 and
+      request.request.amount >= minDeposit and
+      request.request.from.owner == caller
+  };
+
+  public pure func canStartWithdrawWithId(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    request : Types.WithdrawWithIdRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      operationIdValid(request.operationId) and
+        accountBelongsToWallet(request.request.account, caller) and
+        request.request.ledger == supportedLedger and
+        request.request.amount > 0
+    );
+  {
+    operationIdValid(request.operationId) and
+      accountBelongsToWallet(request.request.account, caller) and
+      request.request.ledger == supportedLedger and
+      request.request.amount > 0
+  };
+
+  public pure func noDoubleCreditOnDuplicate(before : Nat, after : Nat) : Bool
+    requires true;
+    ensures result == (after == before);
+  {
+    after == before
+  };
+
+  public pure func noDoubleDebitOnDuplicate(before : Nat, after : Nat) : Bool
+    requires true;
+    ensures result == (after == before);
+  {
+    after == before
+  };
+
+  public pure func duplicateDepositReturnsSame(
+    status : Types.OperationStatus,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : Bool
+    requires true;
+  {
+    switch (status) {
+      case (#depositOk previous) { previous == receipt };
+      case (_) { false }
+    }
+  };
+
+  public pure func duplicateWithdrawReturnsSame(
+    status : Types.OperationStatus,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+  {
+    switch (status) {
+      case (#withdrawOk previous) { previous == receipt };
+      case (_) { false }
+    }
+  };
+
+  public pure func reconciliationVisible(
+    status : Types.OperationStatus,
+    operationId : Types.OperationId
+  ) : Bool
+    requires true;
+  {
+    switch (status) {
+      case (#reconciliationNeeded rec) { rec.operationId == operationId };
+      case (_) { false }
+    }
+  };
+
+  public lemma duplicateDepositDoesNotCredit(before : Nat, after : Nat) : ()
+    requires noDoubleCreditOnDuplicate(before, after);
+    ensures after == before;
+  {};
+
+  public lemma duplicateWithdrawDoesNotDebit(before : Nat, after : Nat) : ()
+    requires noDoubleDebitOnDuplicate(before, after);
+    ensures after == before;
+  {};
+}
+

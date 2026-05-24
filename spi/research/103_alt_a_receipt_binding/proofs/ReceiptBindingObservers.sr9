@@ -1,0 +1,72 @@
+import Kernel "mo:spi/research/103_alt_a_receipt_binding/Kernel";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public lemma acceptedDepositIsAuthorized(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires Kernel.icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures Kernel.accountBelongsToWallet(request.account, caller);
+  {};
+
+  public lemma acceptedDepositUsesSupportedLedger(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires Kernel.icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures request.ledger == supportedLedger;
+  {};
+
+  public lemma acceptedDepositBindsRequest(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires Kernel.icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures Kernel.depositReceiptBindsRequest(request, receipt);
+  {};
+
+  public lemma acceptedDepositCreditsLedgerNode(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires Kernel.icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures Kernel.depositCreditsLedgerNode(request, #ledger(receipt.ledger));
+  {};
+
+  public lemma acceptedWithdrawBindsRequest(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires Kernel.icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures Kernel.withdrawReceiptBindsRequest(request, receipt);
+  {};
+
+  public lemma acceptedWithdrawChargesFee(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires Kernel.icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures receipt.fee == fee;
+    ensures receipt.debitAmount == request.amount + fee;
+  {};
+}
+

@@ -1,0 +1,170 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func canStartIcrcDeposit(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountBelongsToWallet(request.account, caller) and
+        request.ledger == supportedLedger and
+        request.amount > 0 and
+        request.amount >= minDeposit and
+        request.from.owner == caller
+    );
+  {
+    accountBelongsToWallet(request.account, caller) and
+      request.ledger == supportedLedger and
+      request.amount > 0 and
+      request.amount >= minDeposit and
+      request.from.owner == caller
+  };
+
+  public pure func depositSuccessCreditsExactly(before : Nat, amount : Nat, after : Nat) : Bool
+    requires true;
+    ensures result == (after == before + amount);
+  {
+    after == before + amount
+  };
+
+  public pure func depositFailureCreatesNoCredit(before : Nat, after : Nat) : Bool
+    requires true;
+    ensures result == (after == before);
+  {
+    after == before
+  };
+
+  public pure func canStartIcrcWithdraw(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    request : SPI103.IcrcWithdrawRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountBelongsToWallet(request.account, caller) and
+        request.ledger == supportedLedger and
+        request.amount > 0
+    );
+  {
+    accountBelongsToWallet(request.account, caller) and
+      request.ledger == supportedLedger and
+      request.amount > 0
+  };
+
+  public pure func withdrawDebitAmount(amount : Nat, fee : Nat) : Nat
+    requires true;
+    ensures result == amount + fee;
+  {
+    amount + fee
+  };
+
+  public pure func withdrawalCanReserve(balance : Nat, amount : Nat, fee : Nat) : Bool
+    requires true;
+    ensures result == (balance >= amount + fee);
+  {
+    balance >= amount + fee
+  };
+
+  public pure func withdrawalStarted(
+    before : Nat,
+    amount : Nat,
+    fee : Nat,
+    afterDebit : Nat,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : Bool
+    requires true;
+    ensures result == (
+      before >= amount + fee and
+        afterDebit + amount + fee == before and
+        pending.amount == amount and
+        pending.fee == fee and
+        pending.debitAmount == amount + fee
+    );
+  {
+    before >= amount + fee and
+      afterDebit + amount + fee == before and
+      pending.amount == amount and
+      pending.fee == fee and
+      pending.debitAmount == amount + fee
+  };
+
+  public pure func withdrawSuccessFinalizes(
+    during : Nat,
+    after : Nat,
+    pendingCleared : Bool
+  ) : Bool
+    requires true;
+    ensures result == (after == during and pendingCleared);
+  {
+    after == during and pendingCleared
+  };
+
+  public pure func withdrawFailureRestores(
+    before : Nat,
+    after : Nat,
+    pendingCleared : Bool
+  ) : Bool
+    requires true;
+    ensures result == (after == before and pendingCleared);
+  {
+    after == before and pendingCleared
+  };
+
+  public pure func withdrawFailureRestoresReservedDebit(
+    current : Nat,
+    pending : SPI103.PendingIcrcWithdrawal,
+    afterRestore : Nat,
+    pendingCleared : Bool
+  ) : Bool
+    requires true;
+    ensures result == (afterRestore == current + pending.debitAmount and pendingCleared);
+  {
+    afterRestore == current + pending.debitAmount and pendingCleared
+  };
+
+  public pure func withdrawReceiptChargesFee(
+    request : SPI103.IcrcWithdrawRequest,
+    fee : Nat,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == request.account and
+        receipt.ledger == request.ledger and
+        receipt.to == request.to and
+        receipt.amount == request.amount and
+        receipt.fee == fee and
+        receipt.debitAmount == request.amount + fee
+    );
+  {
+    receipt.account == request.account and
+      receipt.ledger == request.ledger and
+      receipt.to == request.to and
+      receipt.amount == request.amount and
+      receipt.fee == fee and
+      receipt.debitAmount == request.amount + fee
+  };
+
+  public lemma withdrawalStartedImpliesReserve(
+    before : Nat,
+    amount : Nat,
+    fee : Nat,
+    afterDebit : Nat,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : ()
+    requires withdrawalStarted(before, amount, fee, afterDebit, pending);
+    ensures withdrawalCanReserve(before, amount, fee);
+    ensures pending.debitAmount == amount + fee;
+  {};
+}

@@ -1,0 +1,21 @@
+import Kernel "mo:spi/research/103_alt_c_operation_id/Kernel";
+
+module {
+  public pure func nonzeroOperationIdIsValid(id : Nat) : Bool
+    requires id > 0;
+    ensures result;
+  {
+    Kernel.operationIdValid(id)
+  };
+
+  public lemma duplicateDepositKeepsBalance(before : Nat, after : Nat) : ()
+    requires Kernel.noDoubleCreditOnDuplicate(before, after);
+    ensures after == before;
+  {};
+
+  public lemma duplicateWithdrawKeepsBalance(before : Nat, after : Nat) : ()
+    requires Kernel.noDoubleDebitOnDuplicate(before, after);
+    ensures after == before;
+  {};
+}
+

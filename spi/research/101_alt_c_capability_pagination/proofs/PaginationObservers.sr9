@@ -1,0 +1,45 @@
+import Kernel "mo:spi/research/101_alt_c_capability_pagination/Kernel";
+
+module {
+  public pure func nullCursorCanAdvance() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.nextCursorMonotonic(null, ?2)
+  };
+
+  public pure func secondPageCanAdvance() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.nextCursorMonotonic(?2, ?4)
+  };
+
+  public pure func finalPageCanEnd() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.nextCursorMonotonic(?4, null)
+  };
+
+  public pure func firstPageHasUniqueIndices() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.pageHasNoDuplicateIndices(null)
+  };
+
+  public pure func secondPageDisjointFromFirst() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.adjacentPagesDisjoint(null, ?2)
+  };
+
+  public pure func completeScanHasUniqueIndices() : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.completeScanHasNoDuplicateIndices()
+  };
+}

@@ -1,0 +1,51 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+import Base "mo:spi/101/Kernel";
+
+module {
+  public pure func accountAuthorized(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == Base.accountAuthorized(caller, account);
+  {
+    Base.accountAuthorized(caller, account)
+  };
+
+  public pure func walletEntryWellFormed(entry : SPI101.WalletEntry) : Bool
+    requires true;
+    ensures result == Base.walletEntryWellFormed(entry);
+  {
+    Base.walletEntryWellFormed(entry)
+  };
+
+  public pure func walletReceiptBindsAndPages(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+  {
+    Base.walletReceiptWellFormed(request, receipt) and
+      Base.nextCursorMonotonic(request.cursor, receipt.nextCursor)
+  };
+
+  public pure func walletReturnedScalar(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+  {
+    accountAuthorized(caller, request.account) and
+      Base.filterAccepted(request.filter) and
+      Base.cursorValid(request.cursor) and
+      walletReceiptBindsAndPages(request, receipt)
+  };
+
+  public lemma walletReturnedScalarImpliesAccountBinding(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturnedScalar(caller, request, receipt);
+    ensures Base.walletReceiptBindsAccount(request, receipt);
+  {};
+}

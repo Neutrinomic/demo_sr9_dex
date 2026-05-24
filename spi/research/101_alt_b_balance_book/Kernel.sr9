@@ -1,0 +1,144 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public pure func accountAuthorized(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, caller);
+  {
+    SPI100.belongsToWallet(account, caller)
+  };
+
+  public pure func walletBindsAccount(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (receipt.account == request.account);
+  {
+    receipt.account == request.account
+  };
+
+  public pure func walletReturned(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountAuthorized(caller, request.account) and
+        walletBindsAccount(request, receipt)
+    );
+  {
+    accountAuthorized(caller, request.account) and
+      walletBindsAccount(request, receipt)
+  };
+
+  public pure func debitAllowed(balance : Nat, amount : Nat) : Bool
+    requires true;
+    ensures result == (balance >= amount);
+  {
+    balance >= amount
+  };
+
+  public pure func fungibleExportNonzero(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.holding) {
+      case (#fungible holding) { holding.amount > 0 };
+      case (#nonfungible(_)) { true }
+    }
+  };
+
+  public pure func exportAmountNonzero(amount : Nat) : Bool
+    requires true;
+    ensures result == (amount > 0);
+  {
+    amount > 0
+  };
+
+  public pure func exportNodesDistinct(a : SPI101.NodeId, b : SPI101.NodeId) : Bool
+    requires true;
+    ensures result == (a != b);
+  {
+    a != b
+  };
+
+  public pure func singleExportAmountLaw(amount : Nat) : Bool
+    requires true;
+    ensures result == exportAmountNonzero(amount);
+  {
+    exportAmountNonzero(amount)
+  };
+
+  public pure func pairExportAmountLaw(
+    aNode : SPI101.NodeId,
+    aAmount : Nat,
+    bNode : SPI101.NodeId,
+    bAmount : Nat
+  ) : Bool
+    requires true;
+    ensures result == (
+      exportAmountNonzero(aAmount) and
+        exportAmountNonzero(bAmount) and
+        exportNodesDistinct(aNode, bNode)
+    );
+  {
+    exportAmountNonzero(aAmount) and
+      exportAmountNonzero(bAmount) and
+      exportNodesDistinct(aNode, bNode)
+  };
+
+  public pure func noDuplicateExportNode(a : SPI101.WalletEntry, b : SPI101.WalletEntry) : Bool
+    requires true;
+    ensures result == (a.node != b.node);
+  {
+    a.node != b.node
+  };
+
+  public pure func singleFungibleExportLaw(entry : SPI101.WalletEntry) : Bool
+    requires true;
+    ensures result == fungibleExportNonzero(entry);
+  {
+    fungibleExportNonzero(entry)
+  };
+
+  public pure func pairFungibleExportLaw(a : SPI101.WalletEntry, b : SPI101.WalletEntry) : Bool
+    requires true;
+    ensures result == (
+      fungibleExportNonzero(a) and
+        fungibleExportNonzero(b) and
+        noDuplicateExportNode(a, b)
+    );
+  {
+    fungibleExportNonzero(a) and
+      fungibleExportNonzero(b) and
+      noDuplicateExportNode(a, b)
+  };
+
+  public lemma walletReturnedImpliesAuthorized(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures accountAuthorized(caller, request.account);
+  {};
+
+  public lemma walletReturnedImpliesAccountBinding(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures receipt.account == request.account;
+  {};
+
+  public lemma pairExportLawImpliesNoDuplicate(
+    a : SPI101.WalletEntry,
+    b : SPI101.WalletEntry
+  ) : ()
+    requires pairFungibleExportLaw(a, b);
+    ensures a.node != b.node;
+  {};
+}

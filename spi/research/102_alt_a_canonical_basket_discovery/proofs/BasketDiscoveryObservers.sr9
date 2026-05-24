@@ -1,0 +1,159 @@
+import Kernel "mo:spi/research/102_alt_a_canonical_basket_discovery/Kernel";
+import Types "mo:spi/102/Types";
+
+module {
+  public pure func sameEdgeReflexive(edge : Types.EdgeId) : Bool
+    requires true;
+    ensures result;
+  {
+    Kernel.sameScopedId(edge, edge)
+  };
+
+  public lemma acceptedReceiptHasGuard(
+    isAuthorized : Bool,
+    q : Types.Quote,
+    guard : Types.Guard,
+    receipt : Types.Receipt
+  ) : ()
+    requires Kernel.receiptAccepted(isAuthorized, q, guard, receipt);
+    ensures Kernel.guardAccepts(guard, receipt, receipt.executedAt);
+  {};
+
+  public pure func singleBasketHasPositiveAmount(node : Types.NodeId, amount : Nat) : Bool
+    requires Kernel.singleBasketCanonical(node, amount);
+    ensures amount > 0;
+  {
+    Kernel.basketAmountPositive(amount)
+  };
+
+  public pure func pairBasketHasNoDuplicateNode(
+    firstNode : Types.NodeId,
+    firstAmount : Nat,
+    secondNode : Types.NodeId,
+    secondAmount : Nat
+  ) : Bool
+    requires Kernel.pairBasketCanonical(firstNode, firstAmount, secondNode, secondAmount);
+    ensures firstAmount > 0;
+    ensures secondAmount > 0;
+    ensures firstNode != secondNode;
+  {
+    Kernel.basketNodesDistinct(firstNode, secondNode)
+  };
+
+  public pure func fixedDexGraphHasDistinctEdges(first : Types.EdgeId, second : Types.EdgeId) : Bool
+    requires Kernel.twoEdgesDistinct(first, second);
+    ensures not Kernel.sameScopedId(first, second);
+  {
+    Kernel.twoEdgesDistinct(first, second)
+  };
+
+  public pure func fixedGraphHasDistinctNodes(
+    first : Types.NodeId,
+    second : Types.NodeId,
+    third : Types.NodeId
+  ) : Bool
+    requires Kernel.threeNodesDistinct(first, second, third);
+    ensures first != second;
+    ensures first != third;
+    ensures second != third;
+  {
+    Kernel.threeNodesDistinct(first, second, third)
+  };
+
+  public lemma projectedBasketHasNoZeroAmount(
+    nodeKeys : [Kernel.ProjectionKey],
+    amounts : [Nat],
+    i : Nat
+  ) : ()
+    reads nodeKeys, amounts
+    requires nodeKeys.size() == amounts.size();
+    requires forall<Nat>(pure func (j : Nat) : Bool =
+      j < amounts.size() ==> amounts[j] > 0);
+    requires i < nodeKeys.size();
+    ensures amounts[i] > 0;
+  {
+    Kernel.projectedBasketEntryNonzero(nodeKeys, amounts, i);
+  };
+
+  public lemma projectedBasketSortedNodesAreUnique(
+    nodeKeys : [Kernel.ProjectionKey],
+    amounts : [Nat],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads nodeKeys, amounts
+    requires nodeKeys.size() == amounts.size();
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < nodeKeys.size() and b < nodeKeys.size() and a < b) ==>
+          nodeKeys[a] < nodeKeys[b]));
+    requires i < nodeKeys.size();
+    requires j < nodeKeys.size();
+    requires i != j;
+    ensures nodeKeys[i] != nodeKeys[j];
+  {
+    Kernel.projectedBasketNodesDistinct(nodeKeys, amounts, i, j);
+  };
+
+  public lemma projectedDiscoverySortedNodesAreUnique(
+    nodeKeys : [Kernel.ProjectionKey],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads nodeKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < nodeKeys.size() and b < nodeKeys.size() and a < b) ==>
+          nodeKeys[a] < nodeKeys[b]));
+    requires i < nodeKeys.size();
+    requires j < nodeKeys.size();
+    requires i != j;
+    ensures nodeKeys[i] != nodeKeys[j];
+  {
+    Kernel.projectedDiscoveryNodesDistinct(nodeKeys, i, j);
+  };
+
+  public lemma projectedDiscoverySortedEdgesAreUnique(
+    edgeKeys : [Kernel.ProjectionKey],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads edgeKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < edgeKeys.size() and b < edgeKeys.size() and a < b) ==>
+          edgeKeys[a] < edgeKeys[b]));
+    requires i < edgeKeys.size();
+    requires j < edgeKeys.size();
+    requires i != j;
+    ensures edgeKeys[i] != edgeKeys[j];
+  {
+    Kernel.projectedDiscoveryEdgesDistinct(edgeKeys, i, j);
+  };
+
+  public lemma projectedDiscoveryAdjacentPagesAreDisjoint(
+    leftKeys : [Kernel.ProjectionKey],
+    rightKeys : [Kernel.ProjectionKey],
+    i : Nat,
+    j : Nat
+  ) : ()
+    reads leftKeys, rightKeys
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < leftKeys.size() and b < leftKeys.size() and a < b) ==>
+          leftKeys[a] < leftKeys[b]));
+    requires forall<Nat>(pure func (a : Nat) : Bool =
+      forall<Nat>(pure func (b : Nat) : Bool =
+        (a < rightKeys.size() and b < rightKeys.size() and a < b) ==>
+          rightKeys[a] < rightKeys[b]));
+    requires leftKeys.size() > 0;
+    requires rightKeys.size() > 0;
+    requires i < leftKeys.size();
+    requires j < rightKeys.size();
+    requires leftKeys[leftKeys.size() - 1] < rightKeys[0];
+    ensures leftKeys[i] != rightKeys[j];
+  {
+    Kernel.projectedSortedPagesDisjointByBoundary(leftKeys, rightKeys, i, j);
+  };
+
+}

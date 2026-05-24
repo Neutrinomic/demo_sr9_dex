@@ -1,0 +1,122 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/101_alt_c_capability_pagination/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+
+persistent actor class PaginatedWalletActor(ledger : Principal) {
+  private pure func localNode(scope : Principal, tag : Nat) : SPI101.NodeId
+    requires tag <= 4_294_967_295;
+  {
+    #local(Blob.appendNat32BEByte(Principal.toBlob(scope), tag, 0))
+  };
+
+  private func entry(index : Nat) : SPI101.WalletEntry
+    reads ledger
+    requires index < 5;
+  {
+    if (index == 0) {
+      SPI101.externalLedgerWalletEntry(ledger, 10, ?"Ledger")
+    } else if (index == 1) {
+      SPI101.fungibleWalletEntry(localNode(ledger, 1), 20, ?"LP")
+    } else if (index == 2) {
+      SPI101.nonfungibleWalletEntry(localNode(ledger, 2), 30, #available, ?#ledger(ledger), ?"Stake")
+    } else if (index == 3) {
+      SPI101.nonfungibleWalletEntry(localNode(ledger, 3), 40, #locked({ unlockAt = ?1_000 }), ?#ledger(ledger), ?"Pending")
+    } else {
+      SPI101.fungibleWalletEntry(localNode(ledger, 4), 50, ?"Reward")
+    }
+  };
+
+  private func pageEntries(cursor : ?Nat) : [SPI101.WalletEntry]
+    reads ledger
+  {
+    switch (cursor) {
+      case null { [entry(0), entry(1)] };
+      case (?0) { [entry(0), entry(1)] };
+      case (?2) { [entry(2), entry(3)] };
+      case (?4) { [entry(4)] };
+      case (_) { [] }
+    }
+  };
+
+  private pure func pageNextCursor(cursor : ?Nat) : ?Nat
+    requires true;
+  {
+    switch (cursor) {
+      case null { ?2 };
+      case (?0) { ?2 };
+      case (?2) { ?4 };
+      case (?4) { null };
+      case (_) { null }
+    }
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : SPI101.WalletRequest
+  ) : async SPI101.Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads ledger
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.pageReturned(caller, request, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not Kernel.callerCanViewAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    if (not Kernel.filterAccepted(request.filter) or not Kernel.cursorValid(request.cursor)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    assert Kernel.filterAccepted(request.filter);
+    assert Kernel.cursorValid(request.cursor);
+    assert Kernel.pageHasNoDuplicateIndices(request.cursor);
+    let cursor = request.cursor;
+    let nextCursor = pageNextCursor(cursor);
+    let receipt : SPI101.WalletReceipt = {
+      account = request.account;
+      entries = pageEntries(cursor);
+      nextCursor = nextCursor;
+      witness = null
+    };
+    assert Kernel.pageBindsAccount(request, receipt);
+    assert receipt.nextCursor == nextCursor;
+    switch (cursor) {
+      case null {
+        assert nextCursor == ?2;
+        assert Kernel.nextCursorMonotonic(cursor, receipt.nextCursor);
+        assert Kernel.adjacentPagesDisjoint(cursor, receipt.nextCursor)
+      };
+      case (?0) {
+        assert nextCursor == ?2;
+        assert Kernel.nextCursorMonotonic(cursor, receipt.nextCursor);
+        assert Kernel.adjacentPagesDisjoint(cursor, receipt.nextCursor)
+      };
+      case (?2) {
+        assert nextCursor == ?4;
+        assert Kernel.nextCursorMonotonic(cursor, receipt.nextCursor);
+        assert Kernel.adjacentPagesDisjoint(cursor, receipt.nextCursor)
+      };
+      case (?4) {
+        assert nextCursor == null;
+        assert Kernel.nextCursorMonotonic(cursor, receipt.nextCursor);
+        assert Kernel.adjacentPagesDisjoint(cursor, receipt.nextCursor)
+      };
+      case (?_) { assert false }
+    };
+    assert Kernel.nextCursorMonotonic(request.cursor, receipt.nextCursor);
+    assert Kernel.pageReturned(caller, request, receipt);
+    #ok(receipt)
+  }
+}

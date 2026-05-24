@@ -1,0 +1,110 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public pure func accountAuthorized(caller : Principal, account : SPI100.Account) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, caller);
+  {
+    SPI100.belongsToWallet(account, caller)
+  };
+
+  public pure func walletReceiptBindsAccount(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (receipt.account == request.account);
+  {
+    receipt.account == request.account
+  };
+
+  public pure func fungibleEntryNonzero(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.holding) {
+      case (#fungible h) { h.amount > 0 };
+      case (#nonfungible(_)) { true }
+    }
+  };
+
+  public pure func nonfungibleEntryHasStableId(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.holding) {
+      case (#fungible(_)) { true };
+      case (#nonfungible(_)) { true }
+    }
+  };
+
+  public pure func displayAssetNotDuplicatedUnlessNull(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.displayAsset) {
+      case null { true };
+      case (?asset) { asset != entry.node }
+    }
+  };
+
+  public pure func statusWellFormed(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    switch (entry.status) {
+      case (#available) { true };
+      case (#locked(_)) { true };
+      case (#pending(_)) { true }
+    }
+  };
+
+  public pure func walletEntryWellFormed(entry : SPI101.WalletEntry) : Bool
+    requires true;
+  {
+    fungibleEntryNonzero(entry) and
+      nonfungibleEntryHasStableId(entry) and
+      displayAssetNotDuplicatedUnlessNull(entry) and
+      statusWellFormed(entry)
+  };
+
+  public pure func walletReceiptWellFormed(
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == walletReceiptBindsAccount(request, receipt);
+  {
+    walletReceiptBindsAccount(request, receipt)
+  };
+
+  public pure func walletReturned(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountAuthorized(caller, request.account) and
+        walletReceiptWellFormed(request, receipt)
+    );
+  {
+    accountAuthorized(caller, request.account) and
+      walletReceiptWellFormed(request, receipt)
+  };
+
+  public lemma walletReturnedImpliesAuthorized(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures accountAuthorized(caller, request.account);
+  {};
+
+  public lemma walletReturnedImpliesAccountBinding(
+    caller : Principal,
+    request : SPI101.WalletRequest,
+    receipt : SPI101.WalletReceipt
+  ) : ()
+    requires walletReturned(caller, request, receipt);
+    ensures walletReceiptBindsAccount(request, receipt);
+  {};
+}

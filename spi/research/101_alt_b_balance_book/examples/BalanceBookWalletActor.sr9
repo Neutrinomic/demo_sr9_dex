@@ -1,0 +1,131 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import AccountNodeBook "mo:spi/research/101_alt_b_balance_book/examples/AccountNodeBook";
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/101_alt_b_balance_book/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+
+persistent actor class BalanceBookWalletActor(ledger : Principal) {
+  var book : AccountNodeBook.AccountNodeBook = AccountNodeBook.empty();
+
+  invariant AccountNodeBook.ordered(book);
+
+  private pure func localNode(scope : Principal) : SPI101.NodeId
+    requires true;
+  {
+    #local(Blob.appendNat32BEByte(Principal.toBlob(scope), 42, 0))
+  };
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountAuthorized(caller, account);
+  {
+    Kernel.accountAuthorized(caller, account)
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared({ caller }) func setup_credit_ledger(account : AccountCodec.Account, amount : Nat) : async Nat
+    reads ledger
+    modifies book
+    ensures AccountNodeBook.ordered(book);
+  {
+    if (authorized(caller, account)) {
+      book := AccountNodeBook.credit(book, account, #ledger(ledger), amount)
+    };
+    AccountNodeBook.balance(book, account, #ledger(ledger))
+  };
+
+  public shared({ caller }) func setup_credit_local(account : AccountCodec.Account, amount : Nat) : async Nat
+    reads ledger
+    modifies book
+    ensures AccountNodeBook.ordered(book);
+  {
+    if (authorized(caller, account)) {
+      book := AccountNodeBook.credit(book, account, localNode(ledger), amount)
+    };
+    AccountNodeBook.balance(book, account, localNode(ledger))
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : SPI101.WalletRequest
+  ) : async SPI101.Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads ledger, book
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.walletReturned(caller, request, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    assert Kernel.accountAuthorized(caller, request.account);
+    let ledgerAmount = AccountNodeBook.balance(book, request.account, #ledger(ledger));
+    let localAmount = AccountNodeBook.balance(book, request.account, localNode(ledger));
+    let entries : [SPI101.WalletEntry] =
+      if (ledgerAmount == 0 and localAmount == 0) {
+        []
+      } else if (ledgerAmount == 0) {
+        let entry : SPI101.WalletEntry = {
+          node = localNode(ledger);
+          holding = #fungible({ amount = localAmount; meta = () });
+          status = #available;
+          displayAsset = null;
+          displayLabel = ?"Local LP"
+        };
+        assert localAmount > 0;
+        assert Kernel.singleExportAmountLaw(localAmount);
+        [entry]
+      } else if (localAmount == 0) {
+        let entry : SPI101.WalletEntry = {
+          node = #ledger(ledger);
+          holding = #fungible({ amount = ledgerAmount; meta = () });
+          status = #available;
+          displayAsset = null;
+          displayLabel = ?"Ledger token"
+        };
+        assert ledgerAmount > 0;
+        assert Kernel.singleExportAmountLaw(ledgerAmount);
+        [entry]
+      } else {
+        let ledgerEntry : SPI101.WalletEntry = {
+          node = #ledger(ledger);
+          holding = #fungible({ amount = ledgerAmount; meta = () });
+          status = #available;
+          displayAsset = null;
+          displayLabel = ?"Ledger token"
+        };
+        let localEntry : SPI101.WalletEntry = {
+          node = localNode(ledger);
+          holding = #fungible({ amount = localAmount; meta = () });
+          status = #available;
+          displayAsset = null;
+          displayLabel = ?"Local LP"
+        };
+        assert ledgerAmount > 0;
+        assert localAmount > 0;
+        assert ledgerEntry.node != localEntry.node;
+        assert Kernel.pairExportAmountLaw(ledgerEntry.node, ledgerAmount, localEntry.node, localAmount);
+        [
+          ledgerEntry,
+          localEntry
+        ]
+      };
+    let receipt : SPI101.WalletReceipt = {
+      account = request.account;
+      entries = entries;
+      nextCursor = null;
+      witness = null
+    };
+    assert Kernel.walletBindsAccount(request, receipt);
+    assert Kernel.walletReturned(caller, request, receipt);
+    #ok(receipt)
+  }
+}

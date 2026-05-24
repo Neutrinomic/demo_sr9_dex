@@ -1,0 +1,130 @@
+import ICRC1 "mo:core/pattern/ICRCLedger";
+import Principal "mo:core/Principal";
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+
+module {
+  public type Result<Ok, Err> = SPI101.Result<Ok, Err>;
+
+  public type LedgerId = SPI101.LedgerId;
+
+  public type LedgerReject = {
+    message : Text
+  };
+
+  public type IcrcDepositRequest = {
+    account : SPI100.Account;
+    ledger : LedgerId;
+    from : ICRC1.Account;
+    amount : Nat
+  };
+
+  public type IcrcDepositReceipt = {
+    account : SPI100.Account;
+    ledger : LedgerId;
+    from : ICRC1.Account;
+    amount : Nat;
+    txIndex : Nat;
+    balanceAfter : Nat
+  };
+
+  public type IcrcDepositError = {
+    #zeroAmount;
+    #amountTooLow : {
+      amount : Nat;
+      minAmount : Nat
+    };
+    #ledgerNotSupported : LedgerId;
+    #accountNotAuthorized : {
+      caller : Principal;
+      account : SPI100.Account
+    };
+    #sourceOwnerMismatch : {
+      caller : Principal;
+      fromOwner : Principal
+    };
+    #icrcTransferFromErr : ICRC1.TransferFromError;
+    #icrcTransferFromRejected : LedgerReject
+  };
+
+  public type IcrcWithdrawRequest = {
+    account : SPI100.Account;
+    ledger : LedgerId;
+    to : ICRC1.Account;
+    amount : Nat
+  };
+
+  public type PendingIcrcWithdrawal = {
+    account : SPI100.Account;
+    ledger : LedgerId;
+    to : ICRC1.Account;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat
+  };
+
+  public type IcrcWithdrawReceipt = {
+    account : SPI100.Account;
+    ledger : LedgerId;
+    to : ICRC1.Account;
+    amount : Nat;
+    fee : Nat;
+    debitAmount : Nat;
+    txIndex : Nat;
+    balanceAfter : Nat
+  };
+
+  public type IcrcWithdrawError = {
+    #zeroAmount;
+    #ledgerNotSupported : LedgerId;
+    #accountNotAuthorized : {
+      caller : Principal;
+      account : SPI100.Account
+    };
+    #insufficientLocalBalance;
+    #withdrawInProgress : PendingIcrcWithdrawal;
+    #icrcFeeRejected : LedgerReject;
+    #icrcTransferErr : ICRC1.TransferError;
+    #icrcTransferRejected : LedgerReject
+  };
+
+  public pure func icrcLedgerNode(ledger : LedgerId) : SPI101.NodeId
+    requires true;
+    ensures result == #ledger(ledger);
+  {
+    SPI101.externalLedgerNode(ledger)
+  };
+
+  public pure func depositCreditsNode(request : IcrcDepositRequest) : SPI101.NodeId
+    requires true;
+    ensures result == #ledger(request.ledger);
+  {
+    icrcLedgerNode(request.ledger)
+  };
+
+  public pure func withdrawDebitsNode(request : IcrcWithdrawRequest) : SPI101.NodeId
+    requires true;
+    ensures result == #ledger(request.ledger);
+  {
+    icrcLedgerNode(request.ledger)
+  };
+
+  public type Actor = actor {
+    // Pulls external ICRC tokens into the protocol canister and credits the
+    // account's SPI-101 wallet node only after the ledger returns success.
+    spi_103_icrc_deposit : shared (request : IcrcDepositRequest) ->
+      async Result<IcrcDepositReceipt, IcrcDepositError> contract {
+        requires true;
+        ensures true;
+      };
+
+    // Debits the account's SPI-101 wallet node by the transfer amount plus fee
+    // before awaiting the ledger, then finalizes or restores that debit from
+    // the guaranteed-response ledger result.
+    spi_103_icrc_withdraw : shared (request : IcrcWithdrawRequest) ->
+      async Result<IcrcWithdrawReceipt, IcrcWithdrawError> contract {
+        requires true;
+        ensures true;
+      }
+  };
+}

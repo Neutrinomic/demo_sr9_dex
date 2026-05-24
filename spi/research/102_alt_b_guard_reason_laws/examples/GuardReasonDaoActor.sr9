@@ -1,0 +1,285 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/102_alt_b_guard_reason_laws/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+import Base "mo:spi/102/Types";
+import Types "mo:spi/research/102_alt_b_guard_reason_laws/Types";
+
+persistent actor class GuardReasonDaoActor(stakingLedger : Principal) {
+  var liquid : Nat = 0;
+  var staked : Nat = 0;
+  var pending : Nat = 0;
+  var now : Int = 0;
+  let fee : Nat = 1;
+
+  private func localNode(tag : Nat) : Base.NodeId
+    reads stakingLedger
+    requires tag <= 4_294_967_295;
+  {
+    #local(Blob.appendNat32BEByte(Principal.toBlob(stakingLedger), tag, 0))
+  };
+
+  private func edge(namespace : Text, id : Nat) : Base.EdgeId
+    reads stakingLedger
+    requires true;
+  {
+    { scope = stakingLedger; namespace = namespace; id = id }
+  };
+
+  private func stakeEdge() : Base.EdgeId
+    reads stakingLedger
+    requires true;
+  { edge("stake", 1) };
+
+  private func requestUnstakeEdge() : Base.EdgeId
+    reads stakingLedger
+    requires true;
+  { edge("request-unstake", 2) };
+
+  private func knownEdge(edgeId : Base.EdgeId) : Bool
+    reads stakingLedger
+    requires true;
+  {
+    Kernel.sameScopedId(edgeId, stakeEdge()) or
+      Kernel.sameScopedId(edgeId, requestUnstakeEdge())
+  };
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  private func basket(node : Base.NodeId, amount : Nat) : [Base.BasketEntry]
+    requires true;
+  {
+    [{ node = node; amount = amount }]
+  };
+
+  private func nodeShape(node : Base.NodeId, form : Base.NodeForm, display : Text) : Base.NodeShape
+    requires true;
+  {
+    {
+      nodeId = node;
+      form = form;
+      displayAsset = null;
+      displayLabel = ?display;
+      risk = null
+    }
+  };
+
+  private func edgeShape(edgeId : Base.EdgeId, inputNodes : [Base.NodeId], outputNodes : [Base.NodeId], display : Text) : Base.EdgeShape
+    requires true;
+  {
+    {
+      edgeId = edgeId;
+      inputNodes = inputNodes;
+      outputNodes = outputNodes;
+      displayLabel = ?display;
+      risk = null
+    }
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared({ caller }) func setup_credit(account : AccountCodec.Account, amount : Nat) : async ()
+    modifies liquid
+  {
+    if (authorized(caller, account)) { liquid += amount }
+  };
+
+  public shared func advance_time(delta : Int) : async ()
+    modifies now
+  {
+    now += delta
+  };
+
+  public shared query func raw_balances() : async (Nat, Nat, Nat)
+    reads liquid, staked, pending
+  {
+    (liquid, staked, pending)
+  };
+
+  public shared query func spi_102_discover(request : Base.DiscoverRequest) : async Base.Discovery
+    reads stakingLedger
+  {
+    let liquidNode : Base.NodeId = #ledger(stakingLedger);
+    let activeNode : Base.NodeId = localNode(1);
+    let pendingNode : Base.NodeId = localNode(2);
+    {
+      account = request.account;
+      nodes = [
+        nodeShape(liquidNode, #fungible, "Liquid stake token"),
+        nodeShape(activeNode, #nonfungible, "Active stake"),
+        nodeShape(pendingNode, #nonfungible, "Pending unstake")
+      ];
+      edges = [
+        { edge = edgeShape(stakeEdge(), [liquidNode], [activeNode], "Stake"); status = #live },
+        { edge = edgeShape(requestUnstakeEdge(), [activeNode], [pendingNode], "Request unstake"); status = #live }
+      ];
+      nextCursor = null;
+      witness = null
+    }
+  };
+
+  private func quoteFor(request : Base.QuoteRequest) : Base.Quote
+    reads now, stakingLedger, fee
+    requires request.intent.amount > 0;
+    ensures Kernel.quoteReturned(true, request, result);
+  {
+    let liquidNode : Base.NodeId = #ledger(stakingLedger);
+    let activeNode : Base.NodeId = localNode(1);
+    let pendingNode : Base.NodeId = localNode(2);
+    if (Kernel.sameScopedId(request.edgeId, stakeEdge())) {
+      {
+        account = request.account;
+        edgeId = request.edgeId;
+        input = basket(liquidNode, request.intent.amount);
+        output = basket(activeNode, request.intent.amount);
+        positionInputs = [];
+        positionOutputs = [];
+        fees = basket(liquidNode, fee);
+        expiresAt = ?(now + 10);
+        preconditions = null;
+        witness = null
+      }
+    } else if (Kernel.sameScopedId(request.edgeId, requestUnstakeEdge())) {
+      {
+        account = request.account;
+        edgeId = request.edgeId;
+        input = basket(activeNode, request.intent.amount);
+        output = basket(pendingNode, request.intent.amount);
+        positionInputs = [];
+        positionOutputs = [];
+        fees = basket(liquidNode, fee);
+        expiresAt = ?(now + 10);
+        preconditions = null;
+        witness = null
+      }
+    } else {
+      {
+        account = request.account;
+        edgeId = request.edgeId;
+        input = basket(activeNode, request.intent.amount);
+        output = basket(pendingNode, request.intent.amount);
+        positionInputs = [];
+        positionOutputs = [];
+        fees = basket(liquidNode, fee);
+        expiresAt = ?(now + 10);
+        preconditions = null;
+        witness = null
+      }
+    }
+  };
+
+  public shared query({ caller }) func spi_102_quote(request : Base.QuoteRequest) : async Types.Result<Base.Quote, Types.ExecuteError>
+    reads now, stakingLedger, fee
+    ensures switch (result) {
+      case (#ok quote) { Kernel.quoteReturned(true, request, quote) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    };
+    if (request.intent.amount == 0) {
+      return #err(#invalidAmount)
+    };
+    if (not knownEdge(request.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    #ok(quoteFor(request))
+  };
+
+  private pure trusted func receiptForAt(q : Base.Quote, executedAt : Int) : Base.Receipt
+    requires true;
+    ensures Kernel.receiptBindsQuote(q, result);
+    ensures result.executedAt == executedAt;
+  {
+    {
+      account = q.account;
+      edgeId = q.edgeId;
+      input = q.input;
+      output = q.output;
+      positionInputs = [];
+      positionOutputs = [];
+      positionRemaining = [];
+      fees = q.fees;
+      executedAt = executedAt;
+      witness = null
+    }
+  };
+
+  public shared({ caller }) func spi_102_execute(request : Base.ExecuteRequest) : async Types.Result<Base.Receipt, Types.ExecuteError>
+    modifies liquid, staked, pending, now
+    reads stakingLedger, fee
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.receiptAccepted(true, request.quote, request.guard, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.quote.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.quote.account }))
+    };
+    if (not knownEdge(request.quote.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let executedAt = now + 1;
+    let receipt = receiptForAt(request.quote, executedAt);
+    if (not Kernel.quoteLive(request.quote, executedAt)) {
+      return #err(#expiredQuote)
+    };
+    switch (Kernel.guardRejectReason(request.guard, receipt, executedAt)) {
+      case (?reason) { return #err(#guardRejected(reason)) };
+      case null {}
+    };
+    let amount = Kernel.basketAmount(request.quote.input, #ledger(stakingLedger));
+    let beforeLiquid = liquid;
+    let beforeStaked = staked;
+    let beforePending = pending;
+    if (Kernel.sameScopedId(request.quote.edgeId, stakeEdge())) {
+      if (liquid < amount + fee) { return #err(#insufficientInput) };
+      liquid -= amount + fee;
+      staked += amount;
+      assert liquid + fee + staked + pending == beforeLiquid + beforeStaked + beforePending
+    } else if (Kernel.sameScopedId(request.quote.edgeId, requestUnstakeEdge())) {
+      let stakeAmount = Kernel.basketAmount(request.quote.input, localNode(1));
+      if (staked < stakeAmount or liquid < fee) { return #err(#insufficientInput) };
+      staked -= stakeAmount;
+      pending += stakeAmount;
+      liquid -= fee;
+      assert liquid + fee + staked + pending == beforeLiquid + beforeStaked + beforePending
+    } else {
+      return #err(#unknownEdge)
+    };
+    now := executedAt;
+    assert beforeLiquid + beforeStaked + beforePending == liquid + fee + staked + pending;
+    assert Kernel.daoConserves(beforeLiquid, beforeStaked, beforePending, liquid + fee, staked, pending);
+    assert Kernel.receiptAccepted(true, request.quote, request.guard, receipt);
+    #ok(receipt)
+  };
+
+  public shared query({ caller }) func spi_101_wallet(request : SPI101.WalletRequest) : async Types.Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads liquid, staked, pending, stakingLedger, now
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    };
+    #ok({
+      account = request.account;
+      entries = [
+        SPI101.externalLedgerWalletEntry(stakingLedger, liquid, ?"Liquid"),
+        SPI101.nonfungibleWalletEntry(localNode(1), staked, #available, ?#ledger(stakingLedger), ?"Active stake"),
+        SPI101.nonfungibleWalletEntry(localNode(2), pending, #pending({ unlockAt = ?(now + 10) }), ?#ledger(stakingLedger), ?"Pending unstake")
+      ];
+      nextCursor = null;
+      witness = null
+    })
+  }
+}

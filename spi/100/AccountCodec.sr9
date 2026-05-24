@@ -1,0 +1,375 @@
+import Blob "mo:core/Blob";
+import Nat8 "mo:core/Nat8";
+import Principal "mo:core/Principal";
+import Prim "mo:⛔";
+
+module {
+  public type LocalId = Nat;
+  public type Wallet = Principal;
+  public type Account = Blob;
+  public type Controller = Principal;
+
+  public type DecodedAccount = {
+    wallet : Wallet;
+    id : LocalId
+  };
+
+  public let maxId : Nat = 4_294_967_295;
+  public let maxPrincipalBytes : Nat = 29;
+  public let maxIdBytes : Nat = 4;
+
+  private pure func idByteLength(id : Nat) : ?Nat
+    requires true;
+    ensures switch (result) {
+      case null { id > 4_294_967_295 };
+      case (?n) { n >= 1 and n <= 4 }
+    };
+  {
+    if (id > maxId) {
+      null
+    } else if (id <= 255) {
+      ?1
+    } else if (id <= 65_535) {
+      ?2
+    } else if (id <= 16_777_215) {
+      ?3
+    } else {
+      ?4
+    }
+  };
+
+  private pure func idByte(id : Nat, idLen : Nat, offset : Nat) : Nat8
+    requires id <= 4_294_967_295;
+    requires idLen >= 1 and idLen <= 4;
+    requires offset < idLen;
+    ensures true;
+  {
+    if (idLen == 1) {
+      Nat8.fromNat(id)
+    } else if (idLen == 2) {
+      if (offset == 0) {
+        Nat8.fromNat(id / 256)
+      } else {
+        Nat8.fromNat(id % 256)
+      }
+    } else if (idLen == 3) {
+      if (offset == 0) {
+        Nat8.fromNat(id / 65_536)
+      } else if (offset == 1) {
+        Nat8.fromNat((id / 256) % 256)
+      } else {
+        Nat8.fromNat(id % 256)
+      }
+    } else {
+      if (offset == 0) {
+        Nat8.fromNat(id / 16_777_216)
+      } else if (offset == 1) {
+        Nat8.fromNat((id / 65_536) % 256)
+      } else if (offset == 2) {
+        Nat8.fromNat((id / 256) % 256)
+      } else {
+        Nat8.fromNat(id % 256)
+      }
+    }
+  };
+
+  private pure func readId(account : Account, start : Nat, idLen : Nat) : Nat
+    requires idLen >= 1 and idLen <= 4;
+    requires start + idLen <= Blob.size(account);
+    ensures result <= 4_294_967_295;
+  {
+    if (idLen == 1) {
+      Nat8.toNat(Blob.get(account, start))
+    } else if (idLen == 2) {
+      Nat8.toNat(Blob.get(account, start)) * 256 +
+        Nat8.toNat(Blob.get(account, start + 1))
+    } else if (idLen == 3) {
+      Nat8.toNat(Blob.get(account, start)) * 65_536 +
+        Nat8.toNat(Blob.get(account, start + 1)) * 256 +
+        Nat8.toNat(Blob.get(account, start + 2))
+    } else {
+      Nat8.toNat(Blob.get(account, start)) * 16_777_216 +
+        Nat8.toNat(Blob.get(account, start + 1)) * 65_536 +
+        Nat8.toNat(Blob.get(account, start + 2)) * 256 +
+        Nat8.toNat(Blob.get(account, start + 3))
+    }
+  };
+
+  private pure trusted func leadingZeroBytes(bytes : Blob) : Nat
+    requires true;
+    ensures result <= Blob.size(bytes);
+  {
+    var i = 0;
+    let size = Blob.size(bytes);
+    while (i < size and Blob.get(bytes, i) == (0 : Nat8)) {
+      i += 1
+    };
+    i
+  };
+
+  public pure func isUsableWallet(wallet : Wallet) : Bool
+    requires true;
+  {
+    let bytes = Principal.toBlob(wallet);
+    let size = Blob.size(bytes);
+    size > 0 and size <= maxPrincipalBytes
+  };
+
+  public pure trusted func encode(wallet : Wallet, id : LocalId) : ?Account
+    requires true;
+    ensures if (isUsableWallet(wallet) and id <= 4_294_967_295) {
+      switch (result) {
+        case null { false };
+        case (?account) { decode(account) == ?{ wallet = wallet; id = id } }
+      }
+    } else {
+      result == null
+    };
+  {
+    if (not isUsableWallet(wallet)) {
+      return null
+    };
+    switch (idByteLength(id)) {
+      case null { null };
+      case (?idLen) {
+        let principalBytes = Principal.toBlob(wallet);
+        let principalLen = Blob.size(principalBytes);
+        let zeroPrefix = leadingZeroBytes(principalBytes);
+        let suffixLen = principalLen - zeroPrefix;
+        let header = Nat8.fromNat(principalLen * 8 + (idLen - 1));
+        let total = 1 + suffixLen + idLen;
+        ?Blob.fromArray(
+          Prim.Array_tabulate<Nat8>(
+            total,
+            trusted func (i : Nat) : Nat8 {
+              if (i == 0) {
+                header
+              } else if (i <= suffixLen) {
+                Blob.get(principalBytes, zeroPrefix + i - 1)
+              } else {
+                idByte(id, idLen, i - 1 - suffixLen)
+              }
+            }
+          )
+        )
+      }
+    }
+  };
+
+  public pure trusted func decode(account : Account) : ?DecodedAccount
+    requires true;
+    ensures switch (result) {
+      case null { true };
+      case (?decoded) { decoded.id <= 4_294_967_295 }
+    };
+    ensures switch (result) {
+      case null { true };
+      case (?decoded) { encode(decoded.wallet, decoded.id) == ?account }
+    };
+  {
+    let size = Blob.size(account);
+    if (size < 2) {
+      return null
+    };
+
+    let header = Nat8.toNat(Blob.get(account, 0));
+    let principalLen = header / 8;
+    let idLen = header % 8 + 1;
+
+    if (principalLen == 0 or principalLen > maxPrincipalBytes) {
+      return null
+    };
+    if (idLen == 0 or idLen > maxIdBytes) {
+      return null
+    };
+    if (size <= idLen) {
+      return null
+    };
+
+    let suffixLen = size - 1 - idLen;
+    if (suffixLen > principalLen) {
+      return null
+    };
+    if (suffixLen > 0 and suffixLen < principalLen and Blob.get(account, 1) == (0 : Nat8)) {
+      return null
+    };
+    if (suffixLen == principalLen and suffixLen > 0 and Blob.get(account, 1) == (0 : Nat8)) {
+      return null
+    };
+
+    let zeroPrefix = principalLen - suffixLen;
+    let principalBlob = Blob.fromArray(
+      Prim.Array_tabulate<Nat8>(
+        principalLen,
+        trusted func (i : Nat) : Nat8 {
+          if (i < zeroPrefix) {
+            0
+          } else {
+            Blob.get(account, 1 + i - zeroPrefix)
+          }
+        }
+      )
+    );
+    let wallet = Principal.fromBlob(principalBlob);
+    if (not isUsableWallet(wallet)) {
+      return null
+    };
+
+    let id = readId(account, 1 + suffixLen, idLen);
+    switch (idByteLength(id)) {
+      case null { null };
+      case (?canonicalIdLen) {
+        if (canonicalIdLen != idLen) {
+          null
+        } else {
+          ?{
+            wallet = wallet;
+            id = id
+          }
+        }
+      }
+    }
+  };
+
+  public pure func accountWallet(account : Account) : ?Wallet
+    requires true;
+  {
+    switch (decode(account)) {
+      case null { null };
+      case (?decoded) { ?decoded.wallet }
+    }
+  };
+
+  public pure func accountId(account : Account) : ?LocalId
+    requires true;
+  {
+    switch (decode(account)) {
+      case null { null };
+      case (?decoded) { ?decoded.id }
+    }
+  };
+
+  public pure func sameAccount(a : Account, b : Account) : Bool
+    requires true;
+    ensures result == (a == b);
+  {
+    a == b
+  };
+
+  public pure func belongsToWallet(account : Account, wallet : Wallet) : Bool
+    requires true;
+  {
+    switch (decode(account)) {
+      case null { false };
+      case (?decoded) { decoded.wallet == wallet }
+    }
+  };
+
+  public lemma encodeDecodeRoundtrip(wallet : Wallet, id : LocalId) : ()
+    requires isUsableWallet(wallet);
+    requires id <= 4_294_967_295;
+    ensures switch (encode(wallet, id)) {
+      case null { false };
+      case (?account) { decode(account) == ?{ wallet = wallet; id = id } }
+    };
+  {};
+
+  public lemma decodeEncodeRoundtrip(account : Account) : ()
+    requires decode(account) != null;
+    ensures switch (decode(account)) {
+      case null { false };
+      case (?decoded) { encode(decoded.wallet, decoded.id) == ?account }
+    };
+  {};
+
+  public lemma encodeInjective(
+    walletA : Wallet,
+    idA : LocalId,
+    walletB : Wallet,
+    idB : LocalId
+  ) : ()
+    requires isUsableWallet(walletA);
+    requires isUsableWallet(walletB);
+    requires idA <= 4_294_967_295;
+    requires idB <= 4_294_967_295;
+    ensures encode(walletA, idA) == encode(walletB, idB) ==>
+      (walletA == walletB and idA == idB);
+  {
+    if (encode(walletA, idA) == encode(walletB, idB)) {
+      switch (encode(walletA, idA)) {
+        case null { assert false };
+        case (?accountA) {
+          switch (encode(walletB, idB)) {
+            case null { assert false };
+            case (?accountB) {
+              assert accountA == accountB;
+              assert decode(accountA) == ?{ wallet = walletA; id = idA };
+              assert decode(accountB) == ?{ wallet = walletB; id = idB };
+              assert ?{ wallet = walletA; id = idA } == ?{ wallet = walletB; id = idB };
+              assert walletA == walletB;
+              assert idA == idB
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public lemma encodeNoCollision(
+    walletA : Wallet,
+    idA : LocalId,
+    walletB : Wallet,
+    idB : LocalId
+  ) : ()
+    requires isUsableWallet(walletA);
+    requires isUsableWallet(walletB);
+    requires idA <= 4_294_967_295;
+    requires idB <= 4_294_967_295;
+    ensures (walletA != walletB or idA != idB) ==>
+      encode(walletA, idA) != encode(walletB, idB);
+  {
+    encodeInjective(walletA, idA, walletB, idB)
+  };
+
+  public lemma validDecodeInjective(accountA : Account, accountB : Account) : ()
+    requires decode(accountA) != null;
+    requires decode(accountB) != null;
+    ensures decode(accountA) == decode(accountB) ==> accountA == accountB;
+  {
+    if (decode(accountA) == decode(accountB)) {
+      switch (decode(accountA)) {
+        case null { assert false };
+        case (?decodedA) {
+          switch (decode(accountB)) {
+            case null { assert false };
+            case (?decodedB) {
+              assert ?decodedA == ?decodedB;
+              assert decodedA == decodedB;
+              assert encode(decodedA.wallet, decodedA.id) == ?accountA;
+              assert encode(decodedB.wallet, decodedB.id) == ?accountB;
+              assert encode(decodedA.wallet, decodedA.id) == encode(decodedB.wallet, decodedB.id);
+              assert ?accountA == ?accountB;
+              assert accountA == accountB
+            }
+          }
+        }
+      }
+    }
+  };
+
+  public lemma validDecodeNoCollision(accountA : Account, accountB : Account) : ()
+    requires decode(accountA) != null;
+    requires decode(accountB) != null;
+    ensures accountA != accountB ==> decode(accountA) != decode(accountB);
+  {
+    validDecodeInjective(accountA, accountB)
+  };
+
+  public lemma decodedIdIsBounded(account : Account) : ()
+    requires decode(account) != null;
+    ensures switch (decode(account)) {
+      case null { false };
+      case (?decoded) { decoded.id <= 4_294_967_295 }
+    };
+  {}
+}

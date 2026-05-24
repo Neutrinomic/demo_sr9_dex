@@ -1,0 +1,164 @@
+import Blob "mo:core/Blob";
+import Principal "mo:core/Principal";
+import SPI100 "mo:spi/100/AccountCodec";
+
+module {
+  public type Result<Ok, Err> = { #ok : Ok; #err : Err };
+
+  public type LedgerId = Principal;
+  public type CanisterId = Principal;
+  public type NodeId = {
+    #ledger : LedgerId;
+    #local : Blob
+  };
+
+  // Stable id scoped by the canister that defines it.
+  public type ScopedId = {
+    scope : CanisterId;
+    namespace : Text;
+    id : Nat
+  };
+
+  // Quantity form advertised for a node. This describes which holdings can
+  // live at the node, but it does not carry account-specific quantity.
+  public type NodeForm = {
+    #fungible;
+    #nonfungible
+  };
+
+  // Base SPI-101 wallet entries do not attach per-holding metadata.
+  public type NoMetadata = ();
+
+  // Account-specific holding at a node. The variant carries the quantity or
+  // concrete item id.
+  public type WalletHolding = {
+    #fungible : {
+      amount : Nat;
+      meta : NoMetadata
+    };
+    #nonfungible : {
+      id : Nat;
+      meta : NoMetadata
+    }
+  };
+
+  public type HoldingStatus = {
+    #available;
+    #locked : { unlockAt : ?Int };
+    #pending : { unlockAt : ?Int }
+  };
+
+  public type WalletEntry = {
+    node : NodeId;
+    holding : WalletHolding;
+    status : HoldingStatus;
+    // Optional display/underlying asset node when it differs from `node`.
+    // `null` means clients can display `node` itself.
+    displayAsset : ?NodeId;
+    displayLabel : ?Text
+  };
+
+  public type WalletRequest = {
+    account : SPI100.Account;
+    cursor : ?Nat;
+    limit : ?Nat;
+    filter : ?Text
+  };
+
+  public type WalletReceipt = {
+    account : SPI100.Account;
+    entries : [WalletEntry];
+    nextCursor : ?Nat;
+    witness : ?Text
+  };
+
+  public type WalletError = {
+    #accountNotAuthorized : {
+      caller : Principal;
+      account : SPI100.Account
+    }
+  };
+
+  public pure func externalLedgerNode(ledger : LedgerId) : NodeId
+    requires true;
+  {
+    #ledger(ledger)
+  };
+
+  public pure func localNode(payload : Blob) : NodeId
+    requires true;
+  {
+    #local(payload)
+  };
+
+  public pure func fungibleWalletEntry(
+    asset : NodeId,
+    amount : Nat,
+    displayName : ?Text
+  ) : WalletEntry
+    requires true;
+  {
+    {
+      node = asset;
+      holding = #fungible({
+        amount = amount;
+        meta = ()
+      });
+      status = #available;
+      displayAsset = null;
+      displayLabel = displayName
+    }
+  };
+
+  public pure func nonfungibleWalletEntry(
+    node : NodeId,
+    id : Nat,
+    status : HoldingStatus,
+    displayAsset : ?NodeId,
+    displayName : ?Text
+  ) : WalletEntry
+    requires true;
+  {
+    {
+      node = node;
+      holding = #nonfungible({
+        id = id;
+        meta = ()
+      });
+      status = status;
+      displayAsset = displayAsset;
+      displayLabel = displayName
+    }
+  };
+
+  public pure func externalLedgerWalletEntry(
+    ledger : LedgerId,
+    amount : Nat,
+    displayName : ?Text
+  ) : WalletEntry
+    requires true;
+  {
+    fungibleWalletEntry(externalLedgerNode(ledger), amount, displayName)
+  };
+
+  public pure func walletReceipt(account : SPI100.Account, entries : [WalletEntry]) : WalletReceipt
+    requires true;
+  {
+    {
+      account = account;
+      entries = entries;
+      nextCursor = null;
+      witness = null
+    }
+  };
+
+  public type Actor = actor {
+    // Returns the account's current nonzero local holdings. Rich holdings are
+    // account-authorized because positions can reveal protocol strategy/state.
+    spi_101_wallet : shared query (request : WalletRequest) ->
+      async Result<WalletReceipt, WalletError> contract {
+        requires true;
+        ensures true;
+      }
+  };
+}

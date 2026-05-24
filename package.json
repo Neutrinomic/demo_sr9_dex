@@ -8,14 +8,18 @@
     "build:dao": "E2E_CONFIG=standard_icrc/dao/test/config.json bun run shared/harness/scripts/buildActorFixture.ts dao",
     "build:dex": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/scripts/buildActorFixture.ts dex",
     "build:spi100": "E2E_CONFIG=spi/100/test/config.json bun run shared/harness/scripts/buildActorFixture.ts --all",
+    "build:spi103": "E2E_CONFIG=spi/103/test/config.json bun run shared/harness/scripts/buildActorFixture.ts --all",
+    "build:spi102": "E2E_CONFIG=spi/102/test/config.json bun run shared/harness/scripts/buildActorFixture.ts --all",
     "compile": "bun run build:actors",
     "test": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/runner/runE2E.ts",
     "test:dao": "E2E_CONFIG=standard_icrc/dao/test/config.json bun run shared/harness/runner/runE2E.ts",
     "test:dao:slow": "E2E_CONFIG=standard_icrc/dao/test/config.json E2E_INCLUDE_SLOW=1 E2E_TIMEOUT_MS=1800000 bun run shared/harness/runner/runE2E.ts",
     "test:dex": "E2E_CONFIG=standard_icrc/dex/test/config.json bun run shared/harness/runner/runE2E.ts",
     "test:spi100": "E2E_CONFIG=spi/100/test/config.json bun run shared/harness/runner/runE2E.ts",
+    "test:spi103": "E2E_CONFIG=spi/103/test/config.json bun run shared/harness/runner/runE2E.ts",
     "test:slow": "E2E_CONFIG=standard_icrc/dex/test/config.json E2E_INCLUDE_SLOW=1 E2E_TIMEOUT_MS=1800000 bun run shared/harness/runner/runE2E.ts",
     "test:raw": "bun test --timeout 240000 standard_icrc/dex/test/spec/**/*.test.ts",
+    "test:spi102": "E2E_CONFIG=spi/102/test/config.json bun run shared/harness/runner/runE2E.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

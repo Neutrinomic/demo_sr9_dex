@@ -1,0 +1,632 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import BMap "mo:core/pure/BMap";
+import Kernel "mo:spi/102/Kernel";
+import Principal "mo:core/Principal";
+import Runtime "mo:core/Runtime";
+import SPI101 "mo:spi/101/Wallet";
+import SPI103 "mo:spi/103/ICRCBridge";
+import Time "mo:core/Time";
+import Types "mo:spi/102/Types";
+
+persistent actor class DaoPendingActor(
+  governanceToken : Principal,
+  unstakeDelay : Int
+) {
+  public type Result<Ok, Err> = Types.Result<Ok, Err>;
+  public type DiscoverRequest = Types.DiscoverRequest;
+  public type QuoteRequest = Types.QuoteRequest;
+  public type ExecuteRequest = Types.ExecuteRequest;
+  public type WalletRequest = SPI101.WalletRequest;
+  public type WalletReceipt = SPI101.WalletReceipt;
+  public type WalletError = SPI101.WalletError;
+  public type WalletEntry = SPI101.WalletEntry;
+  public type IcrcDepositRequest = SPI103.IcrcDepositRequest;
+  public type IcrcDepositReceipt = SPI103.IcrcDepositReceipt;
+  public type IcrcDepositError = SPI103.IcrcDepositError;
+  public type IcrcWithdrawRequest = SPI103.IcrcWithdrawRequest;
+  public type IcrcWithdrawReceipt = SPI103.IcrcWithdrawReceipt;
+  public type IcrcWithdrawError = SPI103.IcrcWithdrawError;
+
+  var liquid : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+  var active : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+  var pending : BMap.BMap<AccountCodec.Account, Nat> = BMap.empty<AccountCodec.Account, Nat>();
+  var unlockTimes : BMap.BMap<AccountCodec.Account, Int> = BMap.empty<AccountCodec.Account, Int>();
+
+  private pure func orderedBooks(
+    liquidBook : BMap.BMap<AccountCodec.Account, Nat>,
+    activeBook : BMap.BMap<AccountCodec.Account, Nat>,
+    pendingBook : BMap.BMap<AccountCodec.Account, Nat>,
+    unlockBook : BMap.BMap<AccountCodec.Account, Int>
+  ) : Bool
+    requires true;
+  {
+    BMap.orderedBy<AccountCodec.Account, Nat>(liquidBook, Blob.compare) and
+      BMap.orderedBy<AccountCodec.Account, Nat>(activeBook, Blob.compare) and
+      BMap.orderedBy<AccountCodec.Account, Nat>(pendingBook, Blob.compare) and
+      BMap.orderedBy<AccountCodec.Account, Int>(unlockBook, Blob.compare)
+  };
+
+  invariant orderedBooks(liquid, active, pending, unlockTimes);
+
+  private pure func callerOwnsAccount(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  private pure func mapBalance(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account
+  ) : Nat
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures result == Map.getOr<AccountCodec.Account, Nat>(
+      BMap.Spec.model<AccountCodec.Account, Nat>(balances),
+      account,
+      0
+    );
+  {
+    switch (BMap.get<AccountCodec.Account, Nat>(balances, Blob.compare, account)) {
+      case null { 0 };
+      case (?amount) { amount }
+    }
+  };
+
+  private pure func unlockOf(
+    times : BMap.BMap<AccountCodec.Account, Int>,
+    account : AccountCodec.Account
+  ) : Int
+    requires BMap.orderedBy<AccountCodec.Account, Int>(times, Blob.compare);
+    ensures result == Map.getOr<AccountCodec.Account, Int>(
+      BMap.Spec.model<AccountCodec.Account, Int>(times),
+      account,
+      0
+    );
+  {
+    switch (BMap.get<AccountCodec.Account, Int>(times, Blob.compare, account)) {
+      case null { 0 };
+      case (?time) { time }
+    }
+  };
+
+  private pure trusted func mapSetNat(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account,
+    amount : Nat
+  ) : BMap.BMap<AccountCodec.Account, Nat>
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures BMap.orderedBy<AccountCodec.Account, Nat>(result, Blob.compare);
+  {
+    BMap.add<AccountCodec.Account, Nat>(balances, Blob.compare, account, amount)
+  };
+
+  private pure trusted func mapCredit(
+    balances : BMap.BMap<AccountCodec.Account, Nat>,
+    account : AccountCodec.Account,
+    amount : Nat
+  ) : BMap.BMap<AccountCodec.Account, Nat>
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(balances, Blob.compare);
+    ensures BMap.orderedBy<AccountCodec.Account, Nat>(result, Blob.compare);
+  {
+    mapSetNat(balances, account, mapBalance(balances, account) + amount)
+  };
+
+  private pure trusted func mapSetInt(
+    times : BMap.BMap<AccountCodec.Account, Int>,
+    account : AccountCodec.Account,
+    time : Int
+  ) : BMap.BMap<AccountCodec.Account, Int>
+    requires BMap.orderedBy<AccountCodec.Account, Int>(times, Blob.compare);
+    ensures BMap.orderedBy<AccountCodec.Account, Int>(result, Blob.compare);
+  {
+    BMap.add<AccountCodec.Account, Int>(times, Blob.compare, account, time)
+  };
+
+  private pure func localId(namespace : Text, id : Nat) : Types.ScopedId
+    requires true;
+  {
+    {
+      scope = Runtime.selfId();
+      namespace = namespace;
+      id = id
+    }
+  };
+
+  private pure func ledgerNode(ledger : Principal) : Types.NodeId
+    requires true;
+  {
+    #ledger(ledger)
+  };
+
+  private pure trusted func activeNode() : Types.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([2]))
+  };
+
+  private pure trusted func pendingNode() : Types.NodeId
+    requires true;
+    ensures true;
+  {
+    #local(Blob.fromArray([3]))
+  };
+
+  private pure func stakeEdge() : Types.EdgeId { localId("stake", 0) };
+  private pure func requestUnstakeEdge() : Types.EdgeId { localId("request-unstake", 1) };
+  private pure func cancelUnstakeEdge() : Types.EdgeId { localId("cancel-unstake", 2) };
+  private pure func claimUnstakedEdge() : Types.EdgeId { localId("claim-unstaked", 3) };
+
+  private func effectiveDelay() : Int
+    reads unstakeDelay
+    requires true;
+    ensures result >= 0;
+  {
+    if (unstakeDelay < 0) { 0 } else { unstakeDelay }
+  };
+
+  private func nodeShape(nodeId : Types.NodeId, form : Types.NodeForm, name : Text) : Types.NodeShape
+    reads governanceToken
+    requires true;
+  {
+    {
+      nodeId = nodeId;
+      form = form;
+      displayAsset = ?ledgerNode(governanceToken);
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  private func walletEntry(
+    node : Types.NodeId,
+    amount : Nat,
+    name : Text,
+    status : SPI101.HoldingStatus
+  ) : WalletEntry
+    reads governanceToken
+    requires true;
+  {
+    {
+      node = node;
+      holding = #fungible({
+        amount = amount;
+        meta = ()
+      });
+      status = status;
+      displayAsset = ?ledgerNode(governanceToken);
+      displayLabel = ?name
+    }
+  };
+
+  private func edgeShape(edgeId : Types.EdgeId, inputs : [Types.NodeId], outputs : [Types.NodeId], name : Text) : Types.EdgeShape
+    requires true;
+  {
+    {
+      edgeId = edgeId;
+      inputNodes = inputs;
+      outputNodes = outputs;
+      displayLabel = ?name;
+      risk = null
+    }
+  };
+
+  private func statusFor(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat, now : Int) : Types.DiscoveryStatus
+    reads liquid, active, pending, unlockTimes
+    requires orderedBooks(liquid, active, pending, unlockTimes);
+  {
+    if (Kernel.sameEdgeId(edgeId, stakeEdge())) {
+      let balance = mapBalance(liquid, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel.sameEdgeId(edgeId, requestUnstakeEdge())) {
+      let balance = mapBalance(active, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel.sameEdgeId(edgeId, cancelUnstakeEdge())) {
+      let balance = mapBalance(pending, account);
+      if (balance > 0 and (amount == 0 or balance >= amount)) { #live } else { #insufficientInput }
+    } else if (Kernel.sameEdgeId(edgeId, claimUnstakedEdge())) {
+      let balance = mapBalance(pending, account);
+      let unlockAt = unlockOf(unlockTimes, account);
+      if (balance == 0 or (amount > 0 and balance < amount)) {
+        #insufficientInput
+      } else if (now < unlockAt) {
+        #notMature({ unlockAt = unlockAt })
+      } else {
+        #live
+      }
+    } else {
+      #protocolSpecific("unknown-edge")
+    }
+  };
+
+  private func discoveryStatus(
+    caller : Principal,
+    account : AccountCodec.Account,
+    edgeId : Types.EdgeId,
+    now : Int
+  ) : Types.DiscoveryStatus
+    reads liquid, active, pending, unlockTimes
+    requires orderedBooks(liquid, active, pending, unlockTimes);
+  {
+    if (not callerOwnsAccount(caller, account)) {
+      #unauthorized
+    } else {
+      statusFor(account, edgeId, 0, now)
+    }
+  };
+
+  private pure trusted func discoveryEdge(shape : Types.EdgeShape, status : Types.DiscoveryStatus) : Types.DiscoveryEdge
+    requires true;
+    ensures true;
+  {
+    { edge = shape; status = status }
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared query({ caller }) trusted func spi_102_discover(
+    request : DiscoverRequest
+  ) : async Types.Discovery
+    reads governanceToken, liquid, active, pending, unlockTimes
+    requires true;
+    ensures true;
+  {
+    let now = Time.now();
+    {
+      account = request.account;
+      nodes = [
+        nodeShape(ledgerNode(governanceToken), #fungible, "Liquid governance balance"),
+        nodeShape(activeNode(), #fungible, "Active stake position"),
+        nodeShape(pendingNode(), #fungible, "Pending unstake position")
+      ];
+      edges = [
+        discoveryEdge(edgeShape(stakeEdge(), [ledgerNode(governanceToken)], [activeNode()], "Stake"), discoveryStatus(caller, request.account, stakeEdge(), now)),
+        discoveryEdge(edgeShape(requestUnstakeEdge(), [activeNode()], [pendingNode()], "Request unstake"), discoveryStatus(caller, request.account, requestUnstakeEdge(), now)),
+        discoveryEdge(edgeShape(cancelUnstakeEdge(), [pendingNode()], [activeNode()], "Cancel unstake"), discoveryStatus(caller, request.account, cancelUnstakeEdge(), now)),
+        discoveryEdge(edgeShape(claimUnstakedEdge(), [pendingNode()], [ledgerNode(governanceToken)], "Claim unstaked"), discoveryStatus(caller, request.account, claimUnstakedEdge(), now))
+      ];
+      nextCursor = null;
+      witness = null
+    }
+  };
+
+  private pure func knownEdge(edgeId : Types.EdgeId) : Bool
+    requires true;
+  {
+    Kernel.sameEdgeId(edgeId, stakeEdge()) or
+      Kernel.sameEdgeId(edgeId, requestUnstakeEdge()) or
+      Kernel.sameEdgeId(edgeId, cancelUnstakeEdge()) or
+      Kernel.sameEdgeId(edgeId, claimUnstakedEdge())
+  };
+
+  private func quoteBaskets(
+    account : AccountCodec.Account,
+    edgeId : Types.EdgeId,
+    inputNode : Types.NodeId,
+    outputNode : Types.NodeId,
+    amount : Nat,
+    now : Int
+  ) : Types.Quote
+    reads governanceToken, unlockTimes, unstakeDelay
+    requires BMap.orderedBy<AccountCodec.Account, Int>(unlockTimes, Blob.compare);
+  {
+    let requestedUnlock = now + effectiveDelay();
+    let unlock = if (Kernel.sameEdgeId(edgeId, requestUnstakeEdge())) { ?requestedUnlock } else { null };
+    let existingUnlock = unlockOf(unlockTimes, account);
+    let inputIsLedger = Kernel.sameEdgeId(edgeId, stakeEdge());
+    let outputIsLedger = Kernel.sameEdgeId(edgeId, claimUnstakedEdge());
+    let inputIsPending = Kernel.sameEdgeId(edgeId, cancelUnstakeEdge()) or
+      Kernel.sameEdgeId(edgeId, claimUnstakedEdge());
+    {
+      account = account;
+      edgeId = edgeId;
+      input = [{ node = inputNode; amount = amount }];
+      output = [{ node = outputNode; amount = amount }];
+      positionInputs = if (inputIsLedger) { [] } else {
+        [{ node = inputNode; positionId = ?0; amount = amount; unlockAt = if (inputIsPending) { ?existingUnlock } else { null }; metadata = null }]
+      };
+      positionOutputs = if (outputIsLedger) { [] } else {
+        [{ node = outputNode; positionId = ?0; amount = amount; unlockAt = unlock; metadata = null }]
+      };
+      fees = [];
+      expiresAt = ?(now + 300_000_000_000);
+      preconditions = null;
+      witness = null
+    }
+  };
+
+  private func quoteFor(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat, now : Int) : Types.Quote
+    reads governanceToken, unlockTimes, unstakeDelay
+    requires BMap.orderedBy<AccountCodec.Account, Int>(unlockTimes, Blob.compare);
+  {
+    if (Kernel.sameEdgeId(edgeId, stakeEdge())) {
+      quoteBaskets(account, edgeId, ledgerNode(governanceToken), activeNode(), amount, now)
+    } else if (Kernel.sameEdgeId(edgeId, requestUnstakeEdge())) {
+      quoteBaskets(account, edgeId, activeNode(), pendingNode(), amount, now)
+    } else if (Kernel.sameEdgeId(edgeId, cancelUnstakeEdge())) {
+      quoteBaskets(account, edgeId, pendingNode(), activeNode(), amount, now)
+    } else {
+      quoteBaskets(account, edgeId, pendingNode(), ledgerNode(governanceToken), amount, now)
+    }
+  };
+
+  public shared query({ caller }) func spi_102_quote(
+    request : QuoteRequest
+  ) : async Result<Types.Quote, Types.ExecuteError>
+    reads governanceToken, unlockTimes, unstakeDelay
+    ensures switch (result) {
+      case (#ok quote) {
+        Kernel.quoteReturned(Kernel.requestAuthorizedForCaller(caller, request), request, quote) and knownEdge(request.edgeId)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (not knownEdge(request.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let now = Time.now();
+    Kernel.quoteResultForCaller(
+      caller,
+      quoteFor(request.account, request.edgeId, request.intent.amount, now),
+      request,
+      now
+    )
+  };
+
+  private pure trusted func quoteAmount(q : Types.Quote) : Nat
+    requires true;
+    ensures true;
+  {
+    if (q.input.size() == 0) { 0 } else { q.input[0].amount }
+  };
+
+  private trusted func receiptFor(q : Types.Quote, amount : Nat, now : Int) : Types.Receipt
+    reads governanceToken, pending, unlockTimes, unstakeDelay
+    requires BMap.orderedBy<AccountCodec.Account, Nat>(pending, Blob.compare);
+    requires BMap.orderedBy<AccountCodec.Account, Int>(unlockTimes, Blob.compare);
+    ensures true;
+  {
+    let refreshed = quoteFor(q.account, q.edgeId, amount, now);
+    let existingUnlock = unlockOf(unlockTimes, q.account);
+    let remaining : [Types.PositionEffect] = if (
+      (Kernel.sameEdgeId(q.edgeId, cancelUnstakeEdge()) or Kernel.sameEdgeId(q.edgeId, claimUnstakedEdge())) and
+      mapBalance(pending, q.account) >= amount
+    ) {
+      [{ node = pendingNode(); positionId = ?0; amount = mapBalance(pending, q.account) - amount; unlockAt = ?existingUnlock; metadata = null }]
+    } else {
+      []
+    };
+    {
+      account = q.account;
+      edgeId = q.edgeId;
+      input = refreshed.input;
+      output = refreshed.output;
+      positionInputs = refreshed.positionInputs;
+      positionOutputs = refreshed.positionOutputs;
+      positionRemaining = remaining;
+      fees = [];
+      executedAt = now;
+      witness = q.witness
+    }
+  };
+
+  private func commit(account : AccountCodec.Account, edgeId : Types.EdgeId, amount : Nat, now : Int) : ?Types.ExecuteError
+    reads unstakeDelay, unlockTimes
+    modifies liquid, active, pending, unlockTimes
+    requires orderedBooks(liquid, active, pending, unlockTimes);
+    ensures orderedBooks(liquid, active, pending, unlockTimes);
+  {
+    if (Kernel.sameEdgeId(edgeId, stakeEdge())) {
+      if (mapBalance(liquid, account) < amount) {
+        ?#insufficientInput
+      } else {
+        liquid := mapSetNat(liquid, account, mapBalance(liquid, account) - amount);
+        active := mapCredit(active, account, amount);
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, requestUnstakeEdge())) {
+      if (mapBalance(active, account) < amount) {
+        ?#insufficientInput
+      } else {
+        active := mapSetNat(active, account, mapBalance(active, account) - amount);
+        pending := mapCredit(pending, account, amount);
+        unlockTimes := mapSetInt(unlockTimes, account, now + effectiveDelay());
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, cancelUnstakeEdge())) {
+      if (mapBalance(pending, account) < amount) {
+        ?#insufficientInput
+      } else {
+        let remaining = mapBalance(pending, account) - amount;
+        pending := mapSetNat(pending, account, remaining);
+        active := mapCredit(active, account, amount);
+        if (remaining == 0) {
+          unlockTimes := mapSetInt(unlockTimes, account, 0)
+        };
+        null
+      }
+    } else if (Kernel.sameEdgeId(edgeId, claimUnstakedEdge())) {
+      if (mapBalance(pending, account) < amount or now < unlockOf(unlockTimes, account)) {
+        ?#insufficientInput
+      } else {
+        let remaining = mapBalance(pending, account) - amount;
+        pending := mapSetNat(pending, account, remaining);
+        liquid := mapCredit(liquid, account, amount);
+        if (remaining == 0) {
+          unlockTimes := mapSetInt(unlockTimes, account, 0)
+        };
+        null
+      }
+    } else {
+      ?#unknownEdge
+    }
+  };
+
+  public shared({ caller }) func spi_102_execute(
+    request : ExecuteRequest
+  ) : async Result<Types.Receipt, Types.ExecuteError>
+    reads governanceToken, unstakeDelay, unlockTimes
+    modifies liquid, active, pending, unlockTimes
+    ensures switch (result) {
+      case (#ok receipt) {
+        Kernel.receiptAccepted(Kernel.quoteAuthorizedForCaller(caller, request.quote), request.quote, request.guard, receipt) and
+          knownEdge(request.quote.edgeId)
+      };
+      case (#err(_)) { true }
+    };
+  {
+    if (not knownEdge(request.quote.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let amount = quoteAmount(request.quote);
+    let now = Time.now();
+    let status = statusFor(request.quote.account, request.quote.edgeId, amount, now);
+    let receipt = receiptFor(request.quote, amount, now);
+    switch (Kernel.checkExecuteForCaller(caller, request.quote, request.guard, receipt, now, status)) {
+      case (?err) { #err(err) };
+      case null {
+        Kernel.executableForCallerImpliesReceiptAccepted(caller, request.quote, request.guard, receipt, now, status);
+        switch (commit(request.quote.account, request.quote.edgeId, amount, now)) {
+          case null { #ok(receipt) };
+          case (?err) { #err(err) }
+        }
+      }
+    }
+  };
+
+  public shared({ caller }) func spi_103_icrc_deposit(
+    request : IcrcDepositRequest
+  ) : async Result<IcrcDepositReceipt, IcrcDepositError>
+    reads governanceToken, liquid, active, pending, unlockTimes
+    modifies liquid
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.ledger != governanceToken) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    if (request.from.owner != caller) {
+      return #err(#sourceOwnerMismatch({
+        caller = caller;
+        fromOwner = request.from.owner
+      }))
+    };
+
+    liquid := mapCredit(liquid, request.account, request.amount);
+    #ok({
+      account = request.account;
+      ledger = request.ledger;
+      from = request.from;
+      amount = request.amount;
+      txIndex = request.amount;
+      balanceAfter = mapBalance(liquid, request.account)
+    })
+  };
+
+  public shared({ caller }) func spi_103_icrc_withdraw(
+    request : IcrcWithdrawRequest
+  ) : async Result<IcrcWithdrawReceipt, IcrcWithdrawError>
+    reads governanceToken, liquid, active, pending, unlockTimes
+    modifies liquid
+  {
+    if (request.amount == 0) {
+      return #err(#zeroAmount)
+    };
+    if (request.ledger != governanceToken) {
+      return #err(#ledgerNotSupported(request.ledger))
+    };
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    let previous = mapBalance(liquid, request.account);
+    if (previous < request.amount) {
+      return #err(#insufficientLocalBalance)
+    };
+    let nextBalance = previous - request.amount;
+    liquid := mapSetNat(liquid, request.account, nextBalance);
+    #ok({
+      account = request.account;
+      ledger = request.ledger;
+      to = request.to;
+      amount = request.amount;
+      fee = 0;
+      debitAmount = request.amount;
+      txIndex = request.amount;
+      balanceAfter = nextBalance
+    })
+  };
+
+  public shared query({ caller }) func spi_101_wallet(
+    request : WalletRequest
+  ) : async Result<WalletReceipt, WalletError>
+    reads governanceToken, liquid, active, pending, unlockTimes
+  {
+    if (not callerOwnsAccount(caller, request.account)) {
+      return #err(#accountNotAuthorized({
+        caller = caller;
+        account = request.account
+      }))
+    };
+    let liquidAmount = mapBalance(liquid, request.account);
+    let activeAmount = mapBalance(active, request.account);
+    let pendingAmount = mapBalance(pending, request.account);
+    let unlockAt = unlockOf(unlockTimes, request.account);
+    let now = Time.now();
+    let pendingStatus : SPI101.HoldingStatus = if (pendingAmount > 0 and now < unlockAt) {
+      #locked({ unlockAt = ?unlockAt })
+    } else {
+      #available
+    };
+    let liquidEntry = walletEntry(ledgerNode(governanceToken), liquidAmount, "Liquid governance balance", #available);
+    let activeEntry = walletEntry(activeNode(), activeAmount, "Active stake position", #available);
+    let pendingEntry = walletEntry(pendingNode(), pendingAmount, "Pending unstake position", pendingStatus);
+    if (liquidAmount == 0 and activeAmount == 0 and pendingAmount == 0) {
+      #ok(SPI101.walletReceipt(request.account, []))
+    } else if (liquidAmount > 0 and activeAmount == 0 and pendingAmount == 0) {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry]))
+    } else if (liquidAmount == 0 and activeAmount > 0 and pendingAmount == 0) {
+      #ok(SPI101.walletReceipt(request.account, [activeEntry]))
+    } else if (liquidAmount == 0 and activeAmount == 0 and pendingAmount > 0) {
+      #ok(SPI101.walletReceipt(request.account, [pendingEntry]))
+    } else if (liquidAmount > 0 and activeAmount > 0 and pendingAmount == 0) {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry, activeEntry]))
+    } else if (liquidAmount > 0 and activeAmount == 0 and pendingAmount > 0) {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry, pendingEntry]))
+    } else if (liquidAmount == 0 and activeAmount > 0 and pendingAmount > 0) {
+      #ok(SPI101.walletReceipt(request.account, [activeEntry, pendingEntry]))
+    } else {
+      #ok(SPI101.walletReceipt(request.account, [liquidEntry, activeEntry, pendingEntry]))
+    }
+  };
+
+  public query func state(account : AccountCodec.Account) : async {
+    liquid : Nat;
+    active : Nat;
+    pending : Nat;
+    unlockAt : Int
+  }
+    reads liquid, active, pending, unlockTimes
+  {
+    {
+      liquid = mapBalance(liquid, account);
+      active = mapBalance(active, account);
+      pending = mapBalance(pending, account);
+      unlockAt = unlockOf(unlockTimes, account)
+    }
+  }
+}

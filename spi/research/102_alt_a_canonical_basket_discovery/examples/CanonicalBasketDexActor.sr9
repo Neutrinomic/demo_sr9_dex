@@ -1,0 +1,274 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import Blob "mo:core/Blob";
+import Kernel "mo:spi/research/102_alt_a_canonical_basket_discovery/Kernel";
+import Principal "mo:core/Principal";
+import SPI101 "mo:spi/101/Wallet";
+import Types "mo:spi/102/Types";
+
+persistent actor class CanonicalBasketDexActor(ledgerA : Principal, ledgerB : Principal) {
+  public type Result<Ok, Err> = Types.Result<Ok, Err>;
+
+  var balanceA : Nat = 0;
+  var balanceB : Nat = 0;
+  var lpShares : Nat = 0;
+  var now : Int = 0;
+
+  private func lpNode() : Types.NodeId
+    reads ledgerA
+    requires true;
+  {
+    #local(Blob.appendNat32BEByte(Principal.toBlob(ledgerA), 1, 0))
+  };
+
+  private func edge(namespace : Text, id : Nat) : Types.EdgeId
+    reads ledgerA
+    requires true;
+  {
+    { scope = ledgerA; namespace = namespace; id = id }
+  };
+
+  private func addLiquidityEdge() : Types.EdgeId
+    reads ledgerA
+    requires true;
+  {
+    edge("add-liquidity", 1)
+  };
+
+  private func swapAToBEdge() : Types.EdgeId
+    reads ledgerA
+    requires true;
+  {
+    edge("swap-a-to-b", 2)
+  };
+
+  private func knownEdge(edgeId : Types.EdgeId) : Bool
+    reads ledgerA
+    requires true;
+  {
+    Kernel.sameScopedId(edgeId, addLiquidityEdge()) or Kernel.sameScopedId(edgeId, swapAToBEdge())
+  };
+
+  private pure func authorized(caller : Principal, account : AccountCodec.Account) : Bool
+    requires true;
+    ensures result == Kernel.accountBelongsToWallet(account, caller);
+  {
+    Kernel.accountBelongsToWallet(account, caller)
+  };
+
+  private func nodeShape(node : Types.NodeId, display : Text) : Types.NodeShape
+    requires true;
+  {
+    {
+      nodeId = node;
+      form = #fungible;
+      displayAsset = null;
+      displayLabel = ?display;
+      risk = null
+    }
+  };
+
+  private func edgeShape(edgeId : Types.EdgeId, inputNodes : [Types.NodeId], outputNodes : [Types.NodeId], display : Text) : Types.EdgeShape
+    requires true;
+  {
+    {
+      edgeId = edgeId;
+      inputNodes = inputNodes;
+      outputNodes = outputNodes;
+      displayLabel = ?display;
+      risk = null
+    }
+  };
+
+  private func basket(node : Types.NodeId, amount : Nat) : [Types.BasketEntry]
+    requires true;
+  {
+    [{ node = node; amount = amount }]
+  };
+
+  private func twoBasket(nodeA : Types.NodeId, nodeB : Types.NodeId, amount : Nat) : [Types.BasketEntry]
+    requires true;
+  {
+    [
+      { node = nodeA; amount = amount },
+      { node = nodeB; amount = amount }
+    ]
+  };
+
+  public shared query func spi_100_account(wallet : Principal, id : Nat) : async ?AccountCodec.Account
+    requires true;
+  {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public shared({ caller }) func setup_credit(account : AccountCodec.Account, amountA : Nat, amountB : Nat) : async ()
+    modifies balanceA, balanceB
+  {
+    if (authorized(caller, account)) {
+      balanceA += amountA;
+      balanceB += amountB
+    }
+  };
+
+  public shared query func spi_102_discover(request : Types.DiscoverRequest) : async Types.Discovery
+    reads ledgerA, ledgerB
+    ensures Kernel.discoveryReturned(request, result);
+  {
+    {
+      account = request.account;
+      nodes = [
+        nodeShape(#ledger(ledgerA), "Token A"),
+        nodeShape(#ledger(ledgerB), "Token B"),
+        nodeShape(lpNode(), "LP share")
+      ];
+      edges = [
+        {
+          edge = edgeShape(addLiquidityEdge(), [#ledger(ledgerA), #ledger(ledgerB)], [lpNode()], "Add liquidity");
+          status = #live
+        },
+        {
+          edge = edgeShape(swapAToBEdge(), [#ledger(ledgerA)], [#ledger(ledgerB)], "Swap A to B");
+          status = #live
+        }
+      ];
+      nextCursor = null;
+      witness = null
+    }
+  };
+
+  private func quoteFor(request : Types.QuoteRequest) : Types.Quote
+    reads now, ledgerA, ledgerB
+    ensures Kernel.quoteBindsRequest(result, request);
+  {
+    if (Kernel.sameScopedId(request.edgeId, addLiquidityEdge())) {
+      {
+        account = request.account;
+        edgeId = request.edgeId;
+        input = twoBasket(#ledger(ledgerA), #ledger(ledgerB), request.intent.amount);
+        output = basket(lpNode(), request.intent.amount);
+        positionInputs = [];
+        positionOutputs = [];
+        fees = [];
+        expiresAt = ?(now + 10);
+        preconditions = null;
+        witness = null
+      }
+    } else {
+      {
+        account = request.account;
+        edgeId = request.edgeId;
+        input = basket(#ledger(ledgerA), request.intent.amount);
+        output = basket(#ledger(ledgerB), request.intent.amount);
+        positionInputs = [];
+        positionOutputs = [];
+        fees = [];
+        expiresAt = ?(now + 10);
+        preconditions = null;
+        witness = null
+      }
+    }
+  };
+
+  public shared query({ caller }) func spi_102_quote(request : Types.QuoteRequest) : async Result<Types.Quote, Types.ExecuteError>
+    reads now, ledgerA, ledgerB
+    ensures switch (result) {
+      case (#ok quote) { Kernel.quoteReturned(true, request, quote) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.account }))
+    };
+    if (request.intent.amount == 0) {
+      return #err(#invalidAmount)
+    };
+    if (not knownEdge(request.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    let quote = quoteFor(request);
+    assert Kernel.quoteBindsRequest(quote, request);
+    assert Kernel.quoteReturned(true, request, quote);
+    #ok(quote)
+  };
+
+  private trusted func receiptFor(q : Types.Quote) : Types.Receipt
+    reads now
+    requires true;
+    ensures Kernel.receiptBindsQuote(q, result);
+    ensures result.executedAt == now;
+  {
+    {
+      account = q.account;
+      edgeId = q.edgeId;
+      input = q.input;
+      output = q.output;
+      positionInputs = [];
+      positionOutputs = [];
+      positionRemaining = [];
+      fees = q.fees;
+      executedAt = now;
+      witness = null
+    }
+  };
+
+  public shared({ caller }) func spi_102_execute(request : Types.ExecuteRequest) : async Result<Types.Receipt, Types.ExecuteError>
+    modifies balanceA, balanceB, lpShares, now
+    reads ledgerA, ledgerB
+    ensures switch (result) {
+      case (#ok receipt) { Kernel.receiptAccepted(true, request.quote, request.guard, receipt) };
+      case (#err(_)) { true }
+    };
+  {
+    if (not authorized(caller, request.quote.account)) {
+      return #err(#accountNotAuthorized({ caller = caller; account = request.quote.account }))
+    };
+    if (not knownEdge(request.quote.edgeId)) {
+      return #err(#unknownEdge)
+    };
+    now += 1;
+    let receipt = receiptFor(request.quote);
+    if (not Kernel.quoteLive(request.quote, now)) {
+      return #err(#expiredQuote)
+    };
+    if (not Kernel.guardAccepts(request.guard, receipt, now)) {
+      return #err(#guardRejected)
+    };
+    let amount = Kernel.basketAmount(request.quote.input, #ledger(ledgerA));
+    if (Kernel.sameScopedId(request.quote.edgeId, addLiquidityEdge())) {
+      if (balanceA < amount or balanceB < amount) {
+        return #err(#insufficientInput)
+      };
+      balanceA -= amount;
+      balanceB -= amount;
+      lpShares += amount
+    } else {
+      if (balanceA < amount) {
+        return #err(#insufficientInput)
+      };
+      balanceA -= amount;
+      balanceB += amount
+    };
+    assert Kernel.receiptBindsQuote(request.quote, receipt);
+    assert Kernel.receiptAccepted(true, request.quote, request.guard, receipt);
+    #ok(receipt)
+  };
+
+  public shared query({ caller }) func spi_101_wallet(request : SPI101.WalletRequest) : async Result<SPI101.WalletReceipt, SPI101.WalletError>
+    reads balanceA, balanceB, lpShares, ledgerA, ledgerB
+  {
+    if (not authorized(caller, request.account)) {
+      let err : SPI101.WalletError = #accountNotAuthorized({ caller = caller; account = request.account });
+      return #err(err)
+    };
+    let receipt : SPI101.WalletReceipt = {
+      account = request.account;
+      entries = [
+        SPI101.externalLedgerWalletEntry(ledgerA, balanceA, ?"Token A"),
+        SPI101.externalLedgerWalletEntry(ledgerB, balanceB, ?"Token B"),
+        SPI101.fungibleWalletEntry(lpNode(), lpShares, ?"LP share")
+      ];
+      nextCursor = null;
+      witness = null
+    };
+    #ok(receipt)
+  }
+}

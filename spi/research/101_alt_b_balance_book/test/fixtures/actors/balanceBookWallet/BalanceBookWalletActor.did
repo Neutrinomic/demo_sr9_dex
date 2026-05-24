@@ -1,0 +1,66 @@
+type WalletRequest = 
+ record {
+   account: Account;
+   cursor: opt nat;
+   filter: opt text;
+   limit: opt nat;
+ };
+type WalletReceipt = 
+ record {
+   account: Account;
+   entries: vec WalletEntry;
+   nextCursor: opt nat;
+   witness: opt text;
+ };
+type WalletHolding = 
+ variant {
+   fungible: record {
+               amount: nat;
+               meta: NoMetadata;
+             };
+   nonfungible: record {
+                  id: nat;
+                  meta: NoMetadata;
+                };
+ };
+type WalletError = variant {
+                     accountNotAuthorized:
+                      record {
+                        account: Account;
+                        caller: principal;
+                      };};
+type WalletEntry = 
+ record {
+   displayAsset: opt NodeId;
+   displayLabel: opt text;
+   holding: WalletHolding;
+   node: NodeId;
+   status: HoldingStatus;
+ };
+type Result = 
+ variant {
+   err: WalletError;
+   ok: WalletReceipt;
+ };
+type NodeId = 
+ variant {
+   ledger: LedgerId;
+   local: blob;
+ };
+type NoMetadata = null;
+type LedgerId = principal;
+type HoldingStatus = 
+ variant {
+   available;
+   locked: record {unlockAt: opt int;};
+   pending: record {unlockAt: opt int;};
+ };
+type BalanceBookWalletActor = 
+ service {
+   setup_credit_ledger: (account: Account, amount: nat) -> (nat);
+   setup_credit_local: (account: Account, amount: nat) -> (nat);
+   spi_100_account: (wallet: principal, id: nat) -> (opt Account) query;
+   spi_101_wallet: (request: WalletRequest) -> (Result) query;
+ };
+type Account = blob;
+service : (ledger: principal) -> BalanceBookWalletActor

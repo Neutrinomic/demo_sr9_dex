@@ -7,7 +7,5 @@ export type ProjectTestExceptions = {
 export const projectTestExceptions: ProjectTestExceptions = {
   skippedSuites: [],
   expectedFailures: [],
-  notes: [
-    "No DAO runtime exceptions are currently configured.",
-  ],
+  notes: ["Fresh DAO surface uses current SPI-100/101/102/103 APIs."],
 };

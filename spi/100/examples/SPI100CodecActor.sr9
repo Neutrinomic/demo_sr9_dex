@@ -1,0 +1,51 @@
+import AccountCodec "mo:spi/100/AccountCodec";
+import AccountText "mo:spi/100/AccountText";
+import Base58 "mo:spi/100/Base58";
+import Blob "mo:core/Blob";
+
+persistent actor class SPI100CodecActor() {
+  public type Account = AccountCodec.Account;
+  public type DecodedAccount = AccountCodec.DecodedAccount;
+
+  public query func spi_100_encode(wallet : Principal, id : Nat) : async ?Account {
+    AccountCodec.encode(wallet, id)
+  };
+
+  public query func spi_100_decode(account : Account) : async ?DecodedAccount {
+    AccountCodec.decode(account)
+  };
+
+  public query func spi_100_account_wallet(account : Account) : async ?Principal {
+    AccountCodec.accountWallet(account)
+  };
+
+  public query func spi_100_account_id(account : Account) : async ?Nat {
+    AccountCodec.accountId(account)
+  };
+
+  public query func spi_100_belongs_to_wallet(
+    account : Account,
+    wallet : Principal
+  ) : async Bool {
+    AccountCodec.belongsToWallet(account, wallet)
+  };
+
+  public query func spi_100_text_encode(account : Account) : async ?Text {
+    switch (AccountCodec.decode(account)) {
+      case null { null };
+      case (?_) { ?AccountText.encode(account) }
+    }
+  };
+
+  public query func spi_100_text_decode(text : Text) : async ?Account {
+    AccountText.decode(text)
+  };
+
+  public query func spi_100_base58_encode(blob : Blob) : async Text {
+    Base58.encode(blob)
+  };
+
+  public query func spi_100_base58_decode(text : Text) : async ?Blob {
+    Base58.decode(text)
+  }
+}

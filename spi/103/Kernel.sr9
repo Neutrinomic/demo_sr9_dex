@@ -1,0 +1,404 @@
+import SPI100 "mo:spi/100/AccountCodec";
+import SPI101 "mo:spi/101/Wallet";
+import SPI103 "mo:spi/103/ICRCBridge";
+
+module {
+  public pure func accountBelongsToWallet(account : SPI100.Account, wallet : Principal) : Bool
+    requires true;
+    ensures result == SPI100.belongsToWallet(account, wallet);
+  {
+    SPI100.belongsToWallet(account, wallet)
+  };
+
+  public pure func ledgerSupported(ledger : SPI103.LedgerId, supportedLedger : SPI103.LedgerId) : Bool
+    requires true;
+    ensures result == (ledger == supportedLedger);
+  {
+    ledger == supportedLedger
+  };
+
+  public pure func nonzeroAmount(amount : Nat) : Bool
+    requires true;
+    ensures result == (amount > 0);
+  {
+    amount > 0
+  };
+
+  public pure func minimumAccepted(amount : Nat, minAmount : Nat) : Bool
+    requires true;
+    ensures result == (amount >= minAmount);
+  {
+    amount >= minAmount
+  };
+
+  public pure func sourceOwnerMatches(caller : Principal, request : SPI103.IcrcDepositRequest) : Bool
+    requires true;
+    ensures result == (request.from.owner == caller);
+  {
+    request.from.owner == caller
+  };
+
+  public pure func depositReceiptBindsRequest(
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == request.account and
+        receipt.ledger == request.ledger and
+        receipt.from == request.from and
+        receipt.amount == request.amount
+    );
+  {
+    receipt.account == request.account and
+      receipt.ledger == request.ledger and
+      receipt.from == request.from and
+      receipt.amount == request.amount
+  };
+
+  public pure func depositCreditsLedgerNode(
+    request : SPI103.IcrcDepositRequest,
+    node : SPI101.NodeId
+  ) : Bool
+    requires true;
+    ensures result == (node == SPI103.depositCreditsNode(request));
+  {
+    node == SPI103.depositCreditsNode(request)
+  };
+
+  public pure func withdrawReceiptBindsRequest(
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == request.account and
+        receipt.ledger == request.ledger and
+        receipt.to == request.to and
+        receipt.amount == request.amount
+    );
+  {
+    receipt.account == request.account and
+      receipt.ledger == request.ledger and
+      receipt.to == request.to and
+      receipt.amount == request.amount
+  };
+
+  public pure func withdrawDebitsLedgerNode(
+    request : SPI103.IcrcWithdrawRequest,
+    node : SPI101.NodeId
+  ) : Bool
+    requires true;
+    ensures result == (node == SPI103.withdrawDebitsNode(request));
+  {
+    node == SPI103.withdrawDebitsNode(request)
+  };
+
+  public pure func withdrawReceiptChargesFee(
+    request : SPI103.IcrcWithdrawRequest,
+    fee : Nat,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.fee == fee and
+        receipt.debitAmount == request.amount + fee
+    );
+  {
+    receipt.fee == fee and
+      receipt.debitAmount == request.amount + fee
+  };
+
+  public pure func pendingWithdrawalBindsRequest(
+    request : SPI103.IcrcWithdrawRequest,
+    fee : Nat,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : Bool
+    requires true;
+    ensures result == (
+      pending.account == request.account and
+        pending.ledger == request.ledger and
+        pending.to == request.to and
+        pending.amount == request.amount and
+        pending.fee == fee and
+        pending.debitAmount == request.amount + fee
+    );
+  {
+    pending.account == request.account and
+      pending.ledger == request.ledger and
+      pending.to == request.to and
+      pending.amount == request.amount and
+      pending.fee == fee and
+      pending.debitAmount == request.amount + fee
+  };
+
+  public pure func pendingWithdrawalSettledByReceipt(
+    pending : SPI103.PendingIcrcWithdrawal,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      receipt.account == pending.account and
+        receipt.ledger == pending.ledger and
+        receipt.to == pending.to and
+        receipt.amount == pending.amount and
+        receipt.fee == pending.fee and
+        receipt.debitAmount == pending.debitAmount
+    );
+  {
+    receipt.account == pending.account and
+      receipt.ledger == pending.ledger and
+      receipt.to == pending.to and
+      receipt.amount == pending.amount and
+      receipt.fee == pending.fee and
+      receipt.debitAmount == pending.debitAmount
+  };
+
+  public pure func canReserveIcrcWithdraw(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : Bool
+    requires true;
+    ensures result == (
+      canStartIcrcWithdraw(caller, supportedLedger, request) and
+        pendingWithdrawalBindsRequest(request, fee, pending)
+    );
+  {
+    canStartIcrcWithdraw(caller, supportedLedger, request) and
+      pendingWithdrawalBindsRequest(request, fee, pending)
+  };
+
+  public pure func icrcWithdrawSettledFromPending(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    request : SPI103.IcrcWithdrawRequest,
+    pending : SPI103.PendingIcrcWithdrawal,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      canStartIcrcWithdraw(caller, supportedLedger, request) and
+        pendingWithdrawalBindsRequest(request, pending.fee, pending) and
+        pendingWithdrawalSettledByReceipt(pending, receipt)
+    );
+  {
+    canStartIcrcWithdraw(caller, supportedLedger, request) and
+      pendingWithdrawalBindsRequest(request, pending.fee, pending) and
+      pendingWithdrawalSettledByReceipt(pending, receipt)
+  };
+
+  public pure func canStartIcrcDeposit(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountBelongsToWallet(request.account, caller) and
+        ledgerSupported(request.ledger, supportedLedger) and
+        nonzeroAmount(request.amount) and
+        minimumAccepted(request.amount, minDeposit) and
+        sourceOwnerMatches(caller, request)
+    );
+  {
+    accountBelongsToWallet(request.account, caller) and
+      ledgerSupported(request.ledger, supportedLedger) and
+      nonzeroAmount(request.amount) and
+      minimumAccepted(request.amount, minDeposit) and
+      sourceOwnerMatches(caller, request)
+  };
+
+  public pure func icrcDepositAccepted(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      canStartIcrcDeposit(caller, supportedLedger, minDeposit, request) and
+        depositReceiptBindsRequest(request, receipt) and
+        depositCreditsLedgerNode(request, #ledger(receipt.ledger))
+    );
+  {
+    canStartIcrcDeposit(caller, supportedLedger, minDeposit, request) and
+      depositReceiptBindsRequest(request, receipt) and
+      depositCreditsLedgerNode(request, #ledger(receipt.ledger))
+  };
+
+  public lemma depositAcceptedImpliesAuthorized(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures accountBelongsToWallet(request.account, caller);
+  {};
+
+  public lemma depositAcceptedImpliesSupportedLedger(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures request.ledger == supportedLedger;
+  {};
+
+  public lemma depositAcceptedImpliesReceiptBinding(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures depositReceiptBindsRequest(request, receipt);
+  {};
+
+  public lemma depositAcceptedImpliesLedgerNode(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    minDeposit : Nat,
+    request : SPI103.IcrcDepositRequest,
+    receipt : SPI103.IcrcDepositReceipt
+  ) : ()
+    requires icrcDepositAccepted(caller, supportedLedger, minDeposit, request, receipt);
+    ensures depositCreditsLedgerNode(request, #ledger(receipt.ledger));
+  {};
+
+  public pure func canStartIcrcWithdraw(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    request : SPI103.IcrcWithdrawRequest
+  ) : Bool
+    requires true;
+    ensures result == (
+      accountBelongsToWallet(request.account, caller) and
+        ledgerSupported(request.ledger, supportedLedger) and
+        nonzeroAmount(request.amount)
+    );
+  {
+    accountBelongsToWallet(request.account, caller) and
+      ledgerSupported(request.ledger, supportedLedger) and
+      nonzeroAmount(request.amount)
+  };
+
+  public pure func icrcWithdrawAccepted(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : Bool
+    requires true;
+    ensures result == (
+      canStartIcrcWithdraw(caller, supportedLedger, request) and
+        withdrawReceiptBindsRequest(request, receipt) and
+        withdrawReceiptChargesFee(request, fee, receipt) and
+        withdrawDebitsLedgerNode(request, #ledger(receipt.ledger))
+    );
+  {
+    canStartIcrcWithdraw(caller, supportedLedger, request) and
+      withdrawReceiptBindsRequest(request, receipt) and
+      withdrawReceiptChargesFee(request, fee, receipt) and
+      withdrawDebitsLedgerNode(request, #ledger(receipt.ledger))
+  };
+
+  public lemma withdrawAcceptedImpliesAuthorized(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures accountBelongsToWallet(request.account, caller);
+  {};
+
+  public lemma withdrawAcceptedImpliesSupportedLedger(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures request.ledger == supportedLedger;
+  {};
+
+  public lemma withdrawAcceptedImpliesReceiptBinding(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures withdrawReceiptBindsRequest(request, receipt);
+  {};
+
+  public lemma withdrawAcceptedImpliesFeeCharge(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures receipt.fee == fee;
+    ensures receipt.debitAmount == request.amount + fee;
+  {};
+
+  public lemma withdrawAcceptedImpliesLedgerNode(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawAccepted(caller, supportedLedger, fee, request, receipt);
+    ensures withdrawDebitsLedgerNode(request, #ledger(receipt.ledger));
+  {};
+
+  public lemma pendingSettlementImpliesCanonicalWithdrawAccepted(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    request : SPI103.IcrcWithdrawRequest,
+    pending : SPI103.PendingIcrcWithdrawal,
+    receipt : SPI103.IcrcWithdrawReceipt
+  ) : ()
+    requires icrcWithdrawSettledFromPending(caller, supportedLedger, request, pending, receipt);
+    ensures icrcWithdrawAccepted(caller, supportedLedger, pending.fee, request, receipt);
+  {};
+
+  public lemma canReserveImpliesAuthorized(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : ()
+    requires canReserveIcrcWithdraw(caller, supportedLedger, fee, request, pending);
+    ensures accountBelongsToWallet(request.account, caller);
+  {};
+
+  public lemma canReserveImpliesDebitAmount(
+    caller : Principal,
+    supportedLedger : SPI103.LedgerId,
+    fee : Nat,
+    request : SPI103.IcrcWithdrawRequest,
+    pending : SPI103.PendingIcrcWithdrawal
+  ) : ()
+    requires canReserveIcrcWithdraw(caller, supportedLedger, fee, request, pending);
+    ensures pending.debitAmount == request.amount + fee;
+  {};
+}

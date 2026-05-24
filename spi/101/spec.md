@@ -1,345 +1,261 @@
-# SPI-101: Deposit, Withdraw, Balance
+# SPI-101: Wallet
 
-SPI-101 standardizes the token edge used by protocol canisters: external ICRC
-tokens enter through deposit, protocol logic runs on local balances, and
-external ICRC tokens leave through withdraw.
+SPI-101 standardizes the local wallet view exposed by protocol canisters.
 
-The DEX and DAO demos already use this pattern, but their public APIs are not
-the standard. SPI-101 is the target surface they should adapt to.
+It does not move external tokens. Deposits, withdrawals, ledger fees, and
+cross-canister ledger calls belong to bridge profiles such as SPI-103. SPI-101
+only says how a client asks, "what does this account currently hold locally?"
 
-## IC Call Model
+## Account Boundary
 
-SPI-101 is the base profile for normal actor calls to supported standard ICRC
-ledgers.
+Every field named `account` is typed directly as `SPI100.Account`, the compact
+blob from SPI-100 that decodes to:
 
-The IC docs distinguish two inter-canister call modes:
+```text
+wallet : Principal
+id     : Nat
+```
 
-- Unbounded-wait calls are guaranteed-response calls. The caller waits for the
-  exact response if the callee responds, or a reject if the call does not
-  successfully execute.
-- Bounded-wait calls can return `SYS_UNKNOWN`, where the caller cannot know from
-  the response whether the callee processed the request.
+The account blob identifies the local account whose holdings are queried,
+quoted, or executed against.
 
-SPI-101 assumes unbounded-wait actor calls. It does not standardize
-bounded-wait retries, operation IDs, or reconciliation. If a protocol chooses
-bounded-wait calls to arbitrary ledgers, that should be a separate extension
-with explicit idempotency and result-query rules.
+The account blob is not authority by itself. Implementations must use their own
+registration or controller policy to decide whether the authenticated `caller`
+can inspect the account. SPI-100 proves account id canonicality and
+no-collision, but it does not prove ownership.
 
-This matters for the interface:
-
-- deposit does not need a retry variant;
-- withdraw does not need a retry variant;
-- ledger `#Err` results are normal ICRC results and can be handled directly;
-- call rejections are treated as failed ledger calls under the supported
-  standard-ledger assumption;
-- implementations still need internal in-flight state around withdraw because
-  `await` commits pre-call state and other messages can interleave before the
-  callback runs.
-
-SPI-101 implementations must avoid traps in post-await callbacks. A trap after
-the ledger response rolls back only the callback message execution, not the
-pre-await state that was already committed.
+SPI-100 account blobs are used only for user/protocol accounts. They are not
+used to mint identities for pools, LP shares, vault shares, stake classes,
+pending-unstake tickets, or other protocol objects. Those objects are nodes.
 
 ## Interface
 
 The importable SR9 type module is:
 
 ```motoko
-import SPI101 "mo:spi/101/DepositWithdrawBalance";
+import SPI101 "mo:spi/101/Wallet";
 ```
 
-The actor type has exactly these methods:
+The actor type has exactly this method:
 
 ```motoko
 public type Actor = actor {
-  spi_101_deposit : shared (request : DepositRequest) ->
-    async Result<DepositReceipt, DepositError>;
-
-  spi_101_withdraw : shared (request : WithdrawRequest) ->
-    async Result<WithdrawReceipt, WithdrawError>;
-
-  spi_101_balance : shared query (request : BalanceRequest) ->
-    async BalanceReceipt
+  spi_101_wallet : shared query (request : WalletRequest) ->
+    async Result<WalletReceipt, WalletError>
 };
 ```
 
-`spi_101_balance` does not return a `Result`. A compliant implementation should
-always be able to return the known local balances for a subject.
+`spi_101_wallet` is account-authorized. Rich wallet entries can expose stake,
+locks, maturity, debt, collateral, or strategy state, so implementations return
+`#accountNotAuthorized` when the caller does not control the requested account.
 
 ## Shared Types
 
 ```motoko
 public type Result<Ok, Err> = { #ok : Ok; #err : Err };
-public type Subaccount = Blob;
-public type Account = ICRCLedger.Account;
-public type BalanceKey = Principal;
-public type BalanceEntry = (BalanceKey, Nat);
-public type LedgerReject = { message : Text };
+public type LedgerId = Principal;
+public type CanisterId = Principal;
+public type NodeId = {
+  #ledger : LedgerId;
+  #local : Blob
+};
+public type ScopedId = {
+  scope : CanisterId;
+  namespace : Text;
+  id : Nat
+};
 ```
 
-`Account` is the ICRC account shape `{ owner : Principal; subaccount : ?Blob }`.
-Subaccounts affect only the external transfer route.
+`LedgerId` is the principal of a supported external ledger canister. SPI-101
+does not say which ledger standard is used to move tokens; it only reserves
+`#ledger(ledger)` as the wallet node for local holdings backed by that ledger.
 
-`subject` is the SPI-101 local account whose balances are credited, debited, or
-queried. A subject is a `Principal`, but it is not necessarily the same value as
-the IC caller. It can be either a direct principal or a SPI-100 delegated account
-principal controlled by the caller. Implementations must authorize mutations
-with the SPI-100 control rule:
+`CanisterId` is the principal of the canister that defines a scoped id, such as
+an SPI-102 edge id. It is not a ledger unless the field is explicitly named
+`ledger`.
+
+## Node Boundary
+
+Nodes are not SPI-100 accounts.
+
+Pools, LP shares, vault shares, stake classes, pending-unstake tickets, debt
+classes, collateral classes, and derived protocol capacities are all modeled as
+nodes. A node has one of these forms:
 
 ```text
-Authorize(caller, subject) = caller controls subject
+#ledger(ledgerPrincipal)
+#local(localPayload)
 ```
 
-This keeps ICRC account ownership separate from local protocol account
-ownership.
+`#ledger` is reserved for local wallet holdings backed by an external ledger.
+`#local` is for everything defined inside the implementing canister. The
+canister owns the payload format. For example, a DEX can use
+`Blob.fromArray([1, 0])` to mean `[lpShareClass, pool0]`, while a DAO can use
+`Blob.fromArray([3, 0])` to mean `[pendingUnstakeClass, class0]`.
 
-`BalanceKey` is the asset key inside a subject's local balance map. Real ICRC
-token balances use the ledger principal as the key. Protocol-local assets use
-SPI-100 virtual principals as keys. A virtual asset key is not itself proof that
-the caller controls a subject.
-
-## Deposit Types
+The reference type module exposes helper constructors:
 
 ```motoko
-public type DepositRequest = {
-  subject : Principal;
-  ledger : Principal;
-  from : Account;
-  amount : Nat
-};
-
-public type DepositReceipt = {
-  ledger : Principal;
-  from : Account;
-  subject : Principal;
-  amount : Nat;
-  txIndex : Nat;
-  balanceAfter : Nat
-};
-
-public type DepositError = {
-  #zeroAmount;
-  #amountTooLow : { amount : Nat; minAmount : Nat };
-  #ledgerNotSupported : Principal;
-  #subjectNotAuthorized : { caller : Principal; subject : Principal };
-  #sourceOwnerMismatch : { caller : Principal; fromOwner : Principal };
-  #ledgerTransferFromErr : ICRCLedger.TransferFromError;
-  #ledgerTransferFromRejected : LedgerReject
-};
+externalLedgerNode(ledger : LedgerId) : NodeId
+localNode(payload : Blob) : NodeId
 ```
 
-## Withdraw Types
+Implementations may define richer node payloads, but they must keep node ids
+stable once clients, quotes, receipts, or wallet entries can reference them.
+
+Examples:
+
+```text
+ICRC token balance    externalLedgerNode(tokenLedger)
+DEX LP share          localNode(pool/share payload)
+DAO active stake      localNode(active-stake payload)
+DAO pending unstake   localNode(pending ticket payload)
+Lending debt          localNode(market/debt payload)
+```
+
+## Wallet Entry Types
 
 ```motoko
-public type WithdrawRequest = {
-  subject : Principal;
-  ledger : Principal;
-  to : Account;
-  amount : Nat
+public type NodeForm = {
+  #fungible;
+  #nonfungible
 };
 
-public type PendingWithdrawal = {
-  subject : Principal;
-  ledger : Principal;
-  to : Account;
-  amount : Nat;
-  fee : Nat;
-  debitAmount : Nat
+public type NoMetadata = ();
+
+public type WalletHolding = {
+  #fungible : { amount : Nat; meta : NoMetadata };
+  #nonfungible : { id : Nat; meta : NoMetadata }
 };
 
-public type WithdrawReceipt = {
-  ledger : Principal;
-  to : Account;
-  subject : Principal;
-  amount : Nat;
-  fee : Nat;
-  debitAmount : Nat;
-  txIndex : Nat;
-  balanceAfter : Nat
+public type HoldingStatus = {
+  #available;
+  #locked : { unlockAt : ?Int };
+  #pending : { unlockAt : ?Int }
 };
 
-public type WithdrawError = {
-  #zeroAmount;
-  #ledgerNotSupported : Principal;
-  #subjectNotAuthorized : { caller : Principal; subject : Principal };
-  #insufficientLocalBalance;
-  #withdrawInProgress : PendingWithdrawal;
-  #ledgerFeeRejected : LedgerReject;
-  #ledgerTransferErr : ICRCLedger.TransferError;
-  #ledgerTransferRejected : LedgerReject
+public type WalletEntry = {
+  node : NodeId;
+  holding : WalletHolding;
+  status : HoldingStatus;
+  displayAsset : ?NodeId;
+  displayLabel : ?Text
 };
 ```
 
-`PendingWithdrawal` is exposed only so a concurrent call can explain why the
-subject is temporarily locked. It is not a retry token in SPI-101.
+`displayAsset` is also a node id, but it should not duplicate `node`. `null`
+means the node itself is the display asset. Protocol positions can set
+`displayAsset` when the holding node differs from the underlying asset clients
+should show, such as a stake position displayed as the governance token node.
 
-## Balance Types
+Timing belongs inside `status`, not in a separate wallet-entry field. For
+example, a locked pending unstake should use
+`status = #locked({ unlockAt = ?unlockTime })`.
+
+The quantity or concrete nonfungible identity belongs inside `holding`.
+Fungible holdings use `holding = #fungible({ amount; meta = () })`. Active stake
+positions, unlocking/pending-unstake positions, NFTs, debt tickets, and similar
+concrete items use `holding = #nonfungible({ id; meta = () })`. The `status`
+says whether that concrete item is available, locked, or pending.
+
+Protocols that need typed metadata can instantiate
+`Holdings.Holding<FungibleMeta, NonfungibleMeta>` from the optional
+`mo:spi/101/Holdings` profile module in their own extension/profile types.
+
+## Wallet Types
 
 ```motoko
-public type BalanceRequest = {
-  subject : Principal
+public type WalletRequest = {
+  account : SPI100.Account;
+  cursor : ?Nat;
+  limit : ?Nat;
+  filter : ?Text
 };
 
-public type BalanceReceipt = {
-  subject : Principal;
-  entries : [BalanceEntry]
+public type WalletReceipt = {
+  account : SPI100.Account;
+  entries : [WalletEntry];
+  nextCursor : ?Nat;
+  witness : ?Text
+};
+
+public type WalletError = {
+  #accountNotAuthorized : { caller : Principal; account : SPI100.Account }
 };
 ```
 
-The response contains all nonzero local balances visible through SPI-101. Each
-principal key appears at most once.
+The response contains all nonzero durable local holdings visible through
+SPI-101. Fungible holdings should appear at most once per node and should have a
+nonzero `amount` inside `holding`. Nonfungible holdings should appear at most
+once per node plus the `id` embedded in `holding`.
 
-## Deposit Semantics
+## Wallet Semantics
 
-`spi_101_deposit(request)` pulls ICRC tokens into the protocol canister and
-credits the subject's local balance only after `icrc2_transfer_from` returns
-`#Ok`.
-
-Required behavior:
-
-- `amount == 0` returns `#zeroAmount`.
-- If the protocol has a minimum accepted deposit and `amount` is below it,
-  return `#amountTooLow { amount; minAmount }`.
-- `ledger` must be a supported external ICRC ledger.
-- If `caller` does not control `request.subject` according to SPI-100, return
-  `#subjectNotAuthorized { caller; subject = request.subject }`.
-- `from.owner` must equal `caller`.
-- The credited local subject is `request.subject`.
-- The credited local balance key is `ledger`.
-- The ledger call is `icrc2_transfer_from` from `request.from` to the protocol
-  canister's account.
-- `from.subaccount` is passed through unchanged.
-- Success credits exactly `amount` and returns a receipt.
-- Ledger `#Err` results and call rejections do not credit local balance.
-
-The local deposit credit is exactly `amount`. Any external ICRC fee is paid
-according to the ledger's transfer-from rules.
-
-Clients must not blindly retry a deposit if they did not observe the response to
-their ingress call. They should query `spi_101_balance` or ledger history first,
-or use a future idempotent extension.
-
-## Withdraw Semantics
-
-`spi_101_withdraw(request)` moves local protocol balance back to an external
-ICRC account.
-
-Required behavior:
-
-- `amount == 0` returns `#zeroAmount`.
-- `ledger` must be a supported external ICRC ledger, not a virtual balance key.
-- If `caller` does not control `request.subject` according to SPI-100, return
-  `#subjectNotAuthorized { caller; subject = request.subject }`.
-- The debited local subject is `request.subject`.
-- The debited local balance key is `ledger`.
-- The protocol obtains or uses a valid transfer fee for the ledger.
-- The subject must have at least `amount + fee` local balance.
-- Before awaiting the ledger, the implementation debits `amount + fee` into
-  internal in-flight withdrawal state.
-- A second overlapping withdraw for that subject returns `#withdrawInProgress`.
-- The ledger call is `icrc1_transfer` sending exactly `amount` to `request.to`.
-- `to.subaccount` is passed through unchanged.
-- Success finalizes the in-flight debit and returns a receipt with
-  `debitAmount == amount + fee`.
-- A ledger `#Err` result restores the full in-flight debit and returns
-  `#ledgerTransferErr`.
-- A call rejection restores the full in-flight debit and returns
-  `#ledgerTransferRejected`.
-
-The restore-on-rejection rule relies on the SPI-101 supported-standard-ledger
-assumption and unbounded-wait calls. Bounded-wait `SYS_UNKNOWN` calls cannot use
-this rule safely.
-
-Clients must not blindly retry a withdraw if they did not observe the response
-to their ingress call. They should query `spi_101_balance` and the destination
-ledger account first, or use a future idempotent extension.
-
-## Balance Semantics
-
-`spi_101_balance` returns the current local balances for `request.subject`.
+`spi_101_wallet` returns the current local wallet for `request.account`.
 
 Required behavior:
 
 - The call is read-only.
-- The response subject equals the requested subject.
-- Entries contain all nonzero SPI-101 local balances.
-- ICRC token balances are keyed by the real ICRC ledger canister principal.
-- Protocol-local assets are keyed by SPI-100 virtual principals.
-- Implementations must not accept a SPI-100 virtual principal as an external
-  ledger for deposit or withdraw.
+- If `caller` does not control `request.account`, return
+  `#accountNotAuthorized { caller; account = request.account }`.
+- On success, the response account equals the requested account.
+- Entries contain all nonzero durable SPI-101 local holdings visible to the
+  account.
+- External-ledger-backed token holdings use the ledger node, such as
+  `externalLedgerNode(ledgerPrincipal)`.
+- Local assets, such as LP shares, vault shares, and staking positions, use
+  local nodes. They must not be SPI-100 accounts.
 
 Example:
 
 ```motoko
 [
-  (tokenA, 1_000_000),
-  (tokenB, 400_000),
-  (virtualPool0, 22_500)
+  {
+    // externalLedgerNode(tokenA)
+    node = #ledger(tokenA);
+    holding = #fungible({ amount = 1_000_000; meta = () });
+    status = #available;
+    displayAsset = null;
+    displayLabel = ?"Token A";
+  },
+  {
+    // localNode(Blob.fromArray([1, 0])) where [1, 0] = [lpShareClass, pool0]
+    node = #local(Blob.fromArray([1, 0]));
+    holding = #fungible({ amount = 22_500; meta = () });
+    status = #available;
+    displayAsset = null;
+    displayLabel = ?"Pool 0 LP";
+  },
+  {
+    // localNode(Blob.fromArray([3, 0])) where [3, 0] = [pendingUnstakeClass, class0]
+    node = #local(Blob.fromArray([3, 0]));
+    holding = #nonfungible({ id = 8; meta = () });
+    status = #locked({ unlockAt = ?unlockTime });
+    displayAsset = ?#ledger(governanceToken);
+    displayLabel = ?"Pending unstake";
+  }
 ]
 ```
 
-## How DEX Should Adapt
+## Relationship To SPI-103
 
-The DEX should expose SPI-101 as a stable compatibility layer while keeping its
-DEX-specific quote, swap, liquidity, and pool methods.
+SPI-103 can define ledger-specific bridge methods that mutate the wallet
+holdings reported by SPI-101. For ICRC ledgers, a successful
+`spi_103_icrc_deposit` credits the `#ledger(request.ledger)` node, and a
+successful `spi_103_icrc_withdraw` debits that same node by `amount + fee`.
 
-- Replace `deposit(ledger, amount)` with
-  `spi_101_deposit({ subject; ledger; from; amount })`.
-- Use `from.owner == caller` and pass `from.subaccount` into
-  `icrc2_transfer_from`.
-- Replace text balance keys with principal keys.
-- Use the real ledger principal for token balances.
-- Use SPI-100 virtual principals for pool share balances.
-- Replace or alias `balances(user)` with `spi_101_balance({ subject = user })`.
-- Replace `withdraw(ledger, amount)` with
-  `spi_101_withdraw({ subject; ledger; to; amount })`.
-- Pass `to.subaccount` into `icrc1_transfer`.
-- Keep the existing internal pre-await debit/restore pattern, but do not expose
-  a public retry method in the SPI-101 surface.
-
-## How DAO Should Adapt
-
-The DAO should expose SPI-101 around its governance ledger while keeping stake,
-proposal, vote, and config methods DAO-specific.
-
-- `ledger` is still present in SPI-101 requests.
-- The governance ledger is the only supported ledger.
-- Any other ledger returns `#ledgerNotSupported`.
-- Deposits credit the subject's liquid governance-token balance.
-- Withdrawals debit the subject's liquid governance-token balance.
-- The existing public `retry_withdrawal` method should not be part of the
-  SPI-101 surface.
-- `spi_101_balance({ subject })` should return the liquid governance-token
-  balance under the governance ledger principal when nonzero.
-- Active stake, locked proposal stake, pending unstake, voting power, and
-  proposals remain DAO-specific views unless the DAO intentionally exposes some
-  of them as SPI-100 virtual-principal balances in a later extension.
-
-## Out Of Scope
-
-SPI-101 does not standardize bounded-wait ledger calls. A bounded-wait extension
-would need at least:
-
-- client or canister operation IDs;
-- `created_at_time` and memo requirements;
-- duplicate-result handling;
-- a way to query or reconcile operation status;
-- explicit rules for `SYS_UNKNOWN`;
-- proofs that retries cannot double credit or double debit.
+This split keeps the wallet model reusable for local protocol holdings,
+HMT-backed assets, ICRC-backed assets, and future bridge profiles.
 
 ## Verification Targets
 
 Implementations claiming SPI-101 should prove these boundaries:
 
-- unsupported ledgers do not change local balances;
-- virtual principals cannot be used as external ledgers;
-- callers cannot mutate subjects they do not control;
-- deposits below the protocol minimum do not change local balances;
-- deposits with `from.owner != caller` do not change local balances;
-- failed deposits do not create local credit;
-- successful deposits credit exactly `amount` once;
-- withdrawals cannot start without enough local balance for `amount + fee`;
-- overlapping withdrawals cannot double-spend the same local balance;
-- successful withdrawals debit exactly `amount + fee` once;
-- failed withdrawals restore exactly the in-flight debit;
-- balance results contain no duplicate keys.
+- wallet results are account-authorized;
+- wallet receipts bind to the requested account;
+- wallet results contain no duplicate fungible nodes;
+- wallet results contain no duplicate nonfungible entries;
+- fungible wallet entries have nonzero amounts;
+- wallet entries accurately describe status/unlock facts;
+- external-ledger-backed balances use `#ledger(ledger)`;
+- local protocol positions use `#local(payload)` and are not SPI-100 accounts.

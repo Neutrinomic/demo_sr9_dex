@@ -1,3 +1,4 @@
+import ActorUtils "./lib/ActorUtils";
 import AssetKey "./lib/AssetKey";
 import AssetPrincipalLookup "./lib/AssetPrincipalLookup";
 import Dex "./lib/Dex";
@@ -5,7 +6,6 @@ import ICRCLedger "mo:core/pattern/ICRCLedger";
 import Principal "mo:core/Principal";
 import Profiling "mo:core/Profiling";
 import ProfileConfig "./lib/ProfileConfig";
-import Runtime "mo:core/Runtime";
 import DexSPI101DepositFlow "./lib/DexSPI101DepositFlow";
 import DexSPI101WithdrawFlow "./lib/DexSPI101WithdrawFlow";
 import SPI101Adapter "./lib/SPI101Adapter";
@@ -63,7 +63,7 @@ persistent actor class DexActorDemo(controller : Principal) {
       case (#err err) { #err(err) };
       case (#ok _) {
         let remote = ICRCLedger.fromPrincipal(request.ledger);
-        let args = SPI101Adapter.transferFromArgs(Runtime.selfId(), request);
+        let args = ActorUtils.depositTransferFromArgs(request);
         try {
           if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:depositLedger:start") };
           let result = await remote.icrc2_transfer_from(args);
@@ -315,7 +315,7 @@ persistent actor class DexActorDemo(controller : Principal) {
     let out = Dex.createPool(dex, caller, ledgerA, ledgerB);
     switch (out) {
       case (#ok info) {
-        switch (VirtualPrincipal.encode(Runtime.selfId(), info.id)) {
+        switch (ActorUtils.poolSharePrincipal(info.id)) {
           case null {};
           case (?principal) {
             AssetPrincipalLookup.put(assetPrincipals, info.key, principal)
@@ -369,14 +369,7 @@ persistent actor class DexActorDemo(controller : Principal) {
           case (#some pending) {
             assert pending.returnedAmount + pending.fee == pending.localBalance;
             let remote = ICRCLedger.fromPrincipal(ledger);
-            let args : ICRCLedger.TransferArg = {
-              to = { owner = pending.user; subaccount = null };
-              fee = ?pending.fee;
-              memo = null;
-              from_subaccount = null;
-              created_at_time = null;
-              amount = pending.returnedAmount
-            };
+            let args = ActorUtils.returnLedgerTransferArgs(pending);
             try {
               if (ProfileConfig.enabled) { Profiling.markAsync("dex:DexActorDemo:returnLedger:start") };
               let result = await remote.icrc1_transfer(args);
